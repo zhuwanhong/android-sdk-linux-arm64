@@ -1,0 +1,149 @@
+{
+  "_about": "The promise this project makes, organised by scenario rather than by binary. status: ok = same as x86/macOS / partial = main path works, something specific missing / no = not possible. evidence is a command you can run; exit codes: 0 verified, 1 real failure, 2 could not be verified. Human-readable copy in PARITY.md (English) and zh/PARITY.md (Chinese) — all three must be changed together.",
+  "updated": "2026-08-30",
+  "scenarios": [
+    {
+      "id": "apk-gradle",
+      "scenario": "Build a debug/release APK with Gradle/AGP",
+      "status": "ok",
+      "evidence": "tests/gradle-build.sh",
+      "note": "Precondition: AGP does not use the aapt2 in your SDK, it resolves an x86_64 one from Maven. Set android.aapt2FromMavenOverride to ours (put it in ~/.gradle/gradle.properties to cover every project); tools/install.sh writes it for you"
+    },
+    {
+      "id": "native-ndkbuild",
+      "scenario": "Build native code with ndk-build",
+      "status": "ok",
+      "evidence": "tests/hello-native/build.sh"
+    },
+    {
+      "id": "native-cmake",
+      "scenario": "Build native code with CMake (NDK toolchain file)",
+      "status": "ok",
+      "evidence": "tools/make-ndk-dist.sh (check 9)"
+    },
+    {
+      "id": "native-agp-cmake",
+      "scenario": "AGP + externalNativeBuild(CMake)",
+      "status": "ok",
+      "evidence": "tests/gradle-build.sh",
+      "note": "tests/hello-native uses externalNativeBuild{cmake}; measured: AGP ran configureCMake/buildCMake tasks"
+    },
+    {
+      "id": "rn-hermes",
+      "scenario": "React Native: compile JS to Hermes bytecode",
+      "status": "ok",
+      "evidence": "tools/build-hermesc.sh --verify"
+    },
+    {
+      "id": "device-install",
+      "scenario": "Install to a phone and read logcat",
+      "status": "ok",
+      "evidence": "tests/hello-native/build.sh --install"
+    },
+    {
+      "id": "adb-server",
+      "scenario": "Run a local adb server",
+      "status": "ok",
+      "evidence": "tools/build-adb.sh --verify",
+      "note": "Fixed 2026-08-30: static bionic enables fdsan, which hits a latent fd-ownership bug upstream and aborts on startup. See patches/adb/README.md"
+    },
+    {
+      "id": "native-debug",
+      "scenario": "Debug native code (lldb to a device)",
+      "status": "ok",
+      "evidence": "tools/verify-lldb-device.sh"
+    },
+    {
+      "id": "static-analysis",
+      "scenario": "Static analysis with clang-tidy / clangd",
+      "status": "ok",
+      "evidence": "tools/link-system-tools.sh"
+    },
+    {
+      "id": "vulkan-shader",
+      "scenario": "Compile Vulkan shaders (glslc / spirv-*)",
+      "status": "ok",
+      "evidence": "tools/link-system-tools.sh"
+    },
+    {
+      "id": "sqlite",
+      "scenario": "Inspect an app's SQLite database",
+      "status": "ok",
+      "evidence": "tools/build-sqlite3.sh --verify"
+    },
+    {
+      "id": "sign-dex",
+      "scenario": "Sign and dex (apksigner / d8)",
+      "status": "ok",
+      "evidence": "tests/hello-jvm/build.sh",
+      "note": "Pure Java, taken unmodified from Google, architecture-independent"
+    },
+    {
+      "id": "apk-analyze",
+      "scenario": "Analyse an APK with apkanalyzer",
+      "status": "ok",
+      "evidence": "cmdline-tools/latest/bin/apkanalyzer apk summary <apk>",
+      "note": "Pure Java"
+    },
+    {
+      "id": "hprof",
+      "scenario": "Convert heap dumps with hprof-conv",
+      "status": "ok",
+      "evidence": "tools/build-hprof-conv.sh --verify",
+      "note": "Byte-compared against Google's output in the acceptance test"
+    },
+    {
+      "id": "sdkmanager",
+      "scenario": "Install our packages through sdkmanager",
+      "status": "ok",
+      "evidence": "tools/make-repo.sh --verify",
+      "note": "SDK_TEST_BASE_URL must end with a slash or sdkmanager silently ignores it"
+    },
+    {
+      "id": "profiling",
+      "scenario": "Profiling with simpleperf",
+      "status": "partial",
+      "evidence": "tools/build-simpleperf.sh --verify",
+      "note": "Command-line record/report works (measured: Samples: 1368). Missing libsimpleperf_report.so, the Python reporting path, because one process cannot mix bionic and glibc. Reading a device-recorded perf.data is not yet verified",
+      "alternative": "Copy perf.data to an x86 machine and use Google's Python scripts for graphical reports"
+    },
+    {
+      "id": "ide-studio",
+      "scenario": "IDE: Android Studio",
+      "status": "no",
+      "evidence": "tools/verify-claims.sh",
+      "note": "Google publishes no Linux ARM64 build (checked 2026-08-30: Windows, Mac, Mac ARM, Linux x64, ChromeOS). Studio is an IDE product, not an SDK component, so this project cannot fix it",
+      "alternative": "IntelliJ IDEA Community ships linuxARM64 (verified against JetBrains' releases API, 2025.3); or any editor plus the command-line paths above"
+    },
+    {
+      "id": "emulator",
+      "scenario": "Emulator",
+      "status": "no",
+      "evidence": "tools/verify-claims.sh",
+      "note": "Google ships linux/x64, macosx/aarch64 and windows/x64 only. Deliberately not done; reasons in docs/zh/README.md roadmap item 7",
+      "alternative": "A real device over adb; or Cuttlefish (AOSP's own virtual device, which ships arm64 host packages) — needs KVM"
+    },
+    {
+      "id": "layout-inspector",
+      "scenario": "Layout Inspector",
+      "status": "no",
+      "evidence": "tools/verify-claims.sh",
+      "note": "skiaparser is closed source and published for a fixed set of platforms (including macOS ARM64, not Linux ARM64); no source was found"
+    },
+    {
+      "id": "auto-dhu",
+      "scenario": "Android Auto desktop head unit (DHU)",
+      "status": "no",
+      "evidence": "tools/verify-claims.sh",
+      "note": "extras;google;auto is closed source, same as above"
+    },
+    {
+      "id": "renderscript",
+      "scenario": "RenderScript",
+      "status": "no",
+      "evidence": null,
+      "note": "Deprecated upstream since Android 12; deliberately not done",
+      "alternative": "AGP no longer requires it"
+    }
+  ]
+}

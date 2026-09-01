@@ -1,0 +1,4 @@
+// AGP 版本写死，不用 latest —— 「哪个版本验过」本身就是结论的一部分。
+plugins {
+    id 'com.android.application' version '9.3.2' apply false
+}

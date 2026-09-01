@@ -1,0 +1,51 @@
+Subject: [PATCH 1/2] ndk-build: 认得 linux-aarch64 这个 host tag
+
+ndk_bin_common.sh 是 ndk-build 求 host tag 的地方。它不写死 x86_64——
+按 uname -m 判——但 case 里没有 aarch64 分支，aarch64 直接落到 *) 报错退出：
+
+    ERROR: Unknown host CPU architecture: aarch64
+
+所以在 ARM64 Linux 上，ndk-build 连 --version 都跑不到。这是整条链上
+最先挡路的地方，比 CMake 那条早。
+
+改动两处：
+
+1. case 里加 aarch64 分支。不跟已有的 arm64 分支合并——arm64 是 macOS 上
+   uname -m 的输出，下面那个 darwin-arm64 -> darwin-x86_64 的重映射还要用它
+   （Google 把 macOS 的 universal 二进制放在 darwin-x86_64 目录里）。
+
+2. 补一个 linux-arm64 -> linux-aarch64 的归一，形式跟已有的 darwin 那块一样。
+   Linux 上 uname -m 通常是 aarch64，但个别系统报 arm64；两个拼法都收敛到
+   一个 host tag，免得出现两个只有名字不同的 prebuilt 目录。
+
+host tag 定为 linux-aarch64 而不是 linux-arm64：上游 NDK 的 ndk/hosts.py 里
+Host 枚举根本没有 ARM host（macOS ARM 是靠 universal 二进制蒙混过去的），
+没有先例可依。选 aarch64 的理由是它等于 uname -m 的原样输出，也跟 sdkmanager
+manifest 里 <host-arch>aarch64</host-arch> 的用词一致。
+
+验收：tools/verify-claims.sh 会检查这一条。摘掉补丁它就变 BLOCK。
+---
+diff --git a/build/tools/ndk_bin_common.sh b/build/tools/ndk_bin_common.sh
+--- a/build/tools/ndk_bin_common.sh
++++ b/build/tools/ndk_bin_common.sh
+@@ -28,6 +28,7 @@
+ HOST_ARCH=$(uname -m)
+ case $HOST_ARCH in
+   arm64) HOST_ARCH=arm64;;
++  aarch64) HOST_ARCH=aarch64;;
+   i?86) HOST_ARCH=x86;;
+   x86_64|amd64) HOST_ARCH=x86_64;;
+   *) echo "ERROR: Unknown host CPU architecture: $HOST_ARCH"
+@@ -42,6 +43,12 @@
+   HOST_TAG=darwin-x86_64
+ fi
+ 
++if [ $HOST_TAG = linux-arm64 ]; then
++  # uname -m on Linux is normally aarch64, but a few systems report arm64.
++  # Normalize so that there is only one Linux ARM host tag.
++  HOST_TAG=linux-aarch64
++fi
++
+ if [ $HOST_OS = cygwin ]; then
+   ANDROID_NDK_PYTHON=$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/windows-x86_64/python3/python.exe
+ else

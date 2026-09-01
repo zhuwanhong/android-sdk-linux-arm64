@@ -1,0 +1,49 @@
+Subject: [PATCH 3/3] make_standalone_toolchain: 按 host CPU 选 linux-aarch64
+
+第三条求 host tag 的路径。get_host_tag_or_die() 只看 sys.platform，不看 CPU：
+
+    if sys.platform.startswith("linux"):
+        return "linux-x86_64"
+
+在 aarch64 上它不报错——**直接返回 linux-x86_64**，然后
+get_toolchain_path_or_die() 拿这个 tag 去找目录，报「Could not find toolchain」。
+比 0001 那条安静，但一样走不通。
+
+用 platform.machine() 而不是 os.uname().machine：后者在 Windows 上没有，
+而这个函数三个平台共用。platform 模块原来没导入，按字母序插在 os 和 shutil
+之间。文件里没有叫 platform 的局部变量或参数，不会遮蔽（查过了）。
+
+同样收 aarch64 和 arm64 两个拼法，跟 0001、0002 保持一致。
+
+**这个工具是 NDK r19 起就废弃的**（standalone toolchain 已经被
+「直接用 NDK 里的 clang」取代），也不在 M1 路径上——Gradle / CMake / ndk-build
+都不走它。补上只是为了别留一处会返回错 tag 的地方；真要用它的人应该先看
+NDK 文档说的替代做法。
+
+顺带记一笔：这个文件里 create_toolchain() 用同一个 host_tag 去拼
+    os.path.join(NDK_DIR, "prebuilt", host_tag)
+也就是说 prebuilt/ 那个目录跟 toolchains/llvm/prebuilt/ 用的是同一个 tag。
+M1 摆目录的时候两处都得是 linux-aarch64。
+
+验收：tools/verify-claims.sh 会检查这一条。摘掉补丁它就变 BLOCK。
+---
+diff --git a/build/tools/make_standalone_toolchain.py b/build/tools/make_standalone_toolchain.py
+--- a/build/tools/make_standalone_toolchain.py
++++ b/build/tools/make_standalone_toolchain.py
+@@ -27,6 +27,7 @@
+ import json
+ import logging
+ import os
++import platform
+ import shutil
+ import stat
+ import sys
+@@ -82,6 +83,8 @@
+ def get_host_tag_or_die():
+     """Return the host tag for this platform. Die if not supported."""
+     if sys.platform.startswith("linux"):
++        if platform.machine() in ("aarch64", "arm64"):
++            return "linux-aarch64"
+         return "linux-x86_64"
+     elif sys.platform == "darwin":
+         return "darwin-x86_64"

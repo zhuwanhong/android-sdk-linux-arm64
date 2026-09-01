@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- layout 是这个测试跟 hello-native 最大的区别：它逼出 R.layout / R.id，
+     也就逼着 aapt2 link 生成 R.java 并让 javac 编它。
+     hello-native 的界面是代码里搭的，整条 R 的路径都没走到。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp">
+
+    <TextView
+        android:id="@+id/message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="@color/accent"
+        android:textSize="18sp" />
+</LinearLayout>

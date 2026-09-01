@@ -1,0 +1,24 @@
+# 这个仓库大概率会有人在 Windows 上开发，产物却要在 ARM64 Linux 上跑。
+# core.autocrlf=true 会把 .sh 的换行换成 CRLF，到 Linux 上就是
+#   bad interpreter: /usr/bin/env bash^M
+# 强制 LF，别让它发生。
+*.sh    text eol=lf
+*.py    text eol=lf
+*.cmake text eol=lf
+# 补丁里的上下文行是 LF 的（NDK 的文件都是 LF）。补丁本身要是被换成 CRLF，
+# patch 就对不上上下文了。
+*.patch text eol=lf
+# 钩子没有扩展名，上面几条盖不到。CRLF 的钩子在 Linux 上根本不会执行。
+.githooks/* text eol=lf
+# makefile 尤其不能带 CRLF：GNU make 会把行尾的  算进变量值，
+# APP_ABI := arm64-v8a 这种错法很难查。
+*.mk    text eol=lf
+Android.mk      text eol=lf
+Application.mk  text eol=lf
+# Gradle 那条路：gradlew 没有扩展名（跟钩子同理，CRLF 就跑不起来），
+# 构建脚本和 wrapper 配置也钉成 LF。
+tests/gradlew   text eol=lf
+*.gradle        text eol=lf
+gradle-wrapper.properties text eol=lf
+# wrapper 的 jar 是二进制，别让任何 text 规则碰它。
+*.jar   binary

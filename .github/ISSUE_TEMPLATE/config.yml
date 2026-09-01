@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: What works and what does not
+    url: https://github.com/zhuwanhong/android-sdk-linux-arm64/blob/main/docs/PARITY.md
+    about: Check here first — some things are known to be impossible, with reasons and alternatives.
+  - name: Security report
+    url: https://github.com/zhuwanhong/android-sdk-linux-arm64/security/advisories/new
+    about: Report vulnerabilities privately, not as a public issue.

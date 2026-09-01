@@ -1,0 +1,80 @@
+Subject: [PATCH 1/1] aapt2 的参数解析器接受 --选项=值
+
+**这个补丁修的是一处「失败方式是静默的」缺陷**，而且是被下游撞出来的，
+不是读代码读出来的。
+
+`cmd/Command.cpp` 的解析循环是逐字比对：
+
+    for (Flag& flag : flags_) {
+      if (arg == flag.name) { ... }
+    }
+
+也就是**只认 `--选项 值`（空格分开）这一种写法**。任何 `--选项=值` 都落到
+最后那句 `unknown option '...'`，退出码 1。
+
+平时没人碰到，因为大多数调用方用空格形式。但 **AGP 的 optimizeXxxResources
+偏偏用等号形式**：
+
+    aapt2 optimize <ap_> --shorten-resource-paths \
+          --resource-path-shortening-map=<路径> -o <输出>
+
+这个选项我们的 aapt2 **是支持的**（`--resource-path-shortening-map arg` 就在
+`optimize --help` 里），换成空格形式退出码 0、产物正常 —— 差的只是写法。
+
+**真正伤人的不是它退出 1，是 AGP 把这个失败吞了**：构建照报 BUILD SUCCESSFUL，
+而产出的 APK 里 `AndroidManifest.xml` 和 `resources.arsc` 全没了，
+`aapt2 dump badging` 报 `could not identify format of APK`。
+一个装上去必崩的包，构建全绿。
+
+改法：匹配之前先在第一个 `=` 处切一刀。带值的选项用等号右边那段，
+不再去吃下一个 argv；不带值的选项写成 `--switch=x` 明确报错，
+**不当成开关静默放行** —— 那会是同一类静默失败。
+
+三条不变：
+  · `--选项 值` 原样работает（下面的匹配先试整串，再试切开的名字）
+  · 文件参数里带 `=` 的不受影响（那一支在函数更早处就 continue 了）
+  · `-o=x` 这种短选项同样能用，因为切分只看有没有 `=`，不看几个横杠
+
+--- a/tools/aapt2/cmd/Command.cpp
++++ b/tools/aapt2/cmd/Command.cpp
+@@ -211,9 +211,39 @@ int Command::Execute(const std::vector<StringPiece>& args, std::ostream* out_err
+       return 1;
+     }
+ 
++    // 允许 --选项=值。上游只逐字比对 flag.name，于是 AGP 传的
++    // --resource-path-shortening-map=<路径> 会变成 "unknown option"，
++    // 而 AGP 会把这个失败吞掉 —— 构建报成功，APK 里却没有资源。
++    // 先在第一个 '=' 处切开；切不开就还是整串，行为跟原来一样。
++    const std::string arg_str(arg.data(), arg.size());
++    std::string inline_name = arg_str;
++    std::string inline_value;
++    bool has_inline_value = false;
++    const size_t eq_pos = arg_str.find('=');
++    if (eq_pos != std::string::npos && eq_pos > 0) {
++      inline_name = arg_str.substr(0, eq_pos);
++      inline_value = arg_str.substr(eq_pos + 1);
++      has_inline_value = true;
++    }
++
+     bool match = false;
+     for (Flag& flag : flags_) {
+-      if (arg == flag.name) {
++      const bool exact = (arg == flag.name);
++      const bool with_value = has_inline_value && !exact && inline_name == flag.name;
++      if (with_value) {
++        if (flag.num_args == 0) {
++          // --switch=x：上游没有这种写法。静默忽略等号右边会变成另一处
++          // 「失败方式是静默的」，所以明说。
++          *out_error << flag.name << " takes no argument, got '" << inline_value << "'.\n\n";
++          Usage(out_error);
++          return 1;
++        }
++        flag.action(android::StringPiece(inline_value));
++        flag.found = true;
++        match = true;
++        break;
++      }
++      if (exact) {
+         if (flag.num_args > 0) {
+           i++;
+           if (i >= args.size()) {

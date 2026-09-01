@@ -1,0 +1,36 @@
+plugins { id 'com.android.application' }
+
+// 这个工程有两条构建路径，共用同一份源码：
+//   build.sh     手工流水线（aapt2 / javac / d8 / zipalign / apksigner）→ build/
+//   ./gradlew    AGP                                                    → build-gradle/
+// 两条都得能跑，所以 Gradle 这条**不许改源码布局**，只用 sourceSets 指过去；
+// 产物目录也错开，免得互相盖掉对方的 APK。
+layout.buildDirectory = file('build-gradle')
+
+// AGP 8 起，AndroidManifest.xml 里的 package="…" 是**错误**不是警告，要改用
+// namespace。可 build.sh 那条走 aapt2 link，**必须**有 package。与其维护两份
+// 早晚会对不上的清单，这里在配置阶段生成一份去掉 package 的副本给 AGP 用：
+// 单一事实来源仍然是 AndroidManifest.xml。
+def agpManifest = layout.buildDirectory.file('gen/AndroidManifest.xml').get().asFile
+agpManifest.parentFile.mkdirs()
+agpManifest.text = file('AndroidManifest.xml').text.replaceAll(/\s*package="[^"]*"/, '')
+
+android {
+    namespace 'com.example.hellojvm'
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 21
+        targetSdk 36
+        versionCode 1
+        versionName '1.0'
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile agpManifest
+            java.srcDirs = ['java']
+            res.srcDirs  = ['res']
+        }
+    }
+}

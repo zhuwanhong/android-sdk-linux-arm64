@@ -1,0 +1,73 @@
+Subject: [PATCH 1/1] 不写空值的 meta info —— 否则录出来的 perf.data 自己读不回
+
+**这是一处「写的一侧和读的一侧对不上」的缺陷**，暴露条件很窄，所以上游没碰到。
+
+读的那一侧（`record_file_reader.cpp` 的 `ReadMetaInfoFeature`）把空值判成文件
+损坏：
+
+    if (value_end == value_start || value_end == s.npos) {
+      LOG(ERROR) << "invalid meta info in " << filename_;
+      return false;
+    }
+
+**一个空值就让整个 perf.data 读不了。**
+
+而写的那一侧会写出空值 —— 只在我们这种构型下：`cmd_record.cpp:2146` 那段在
+`#if defined(__ANDROID__)` 里，用 `GetProperty("ro.*", "")` 取五个键的值
+（product_props / android_version / android_sdk_version / android_build_type /
+android_build_fingerprint）。真设备上都有内容；而**我们这份是 Android 目标的
+二进制、跑在 ARM64 Linux 上**，没有属性服务，五个全是空串。
+
+实测：`simpleperf record` 说 "Samples recorded: 2"，文件也写出来了，
+紧接着 `simpleperf report -i` 同一个文件 —— `invalid meta info`。
+
+官方的 host 版是 glibc 构建，不定义 `__ANDROID__`，**根本不写这几个键**。
+所以跳过空值之后，我们的行为跟官方 host 版一致，而在真设备上是个 no-op
+（那几个值非空）。
+
+改在 `WriteMetaInfoFeature` 而不是 `cmd_record.cpp`：那里是所有 meta info 的
+唯一出口，一处就把所有来源的空值都挡住（`extra_meta_info_` 也可能带空值）。
+
+**两个循环必须用同一个条件** —— 上面那个算 buf 长度、下面那个写内容，
+漏掉一处就会算错大小。
+
+--- a/simpleperf/record_file_writer.cpp
++++ b/simpleperf/record_file_writer.cpp
+@@ -540,14 +540,37 @@ bool RecordFileWriter::WriteFileFeature(const FileFeature& file) {
+ 
+ bool RecordFileWriter::WriteMetaInfoFeature(
+     const std::unordered_map<std::string, std::string>& info_map) {
++  // 空值的键**一个都不写**。
++  //
++  // 读的那一侧（record_file_reader.cpp 的 ReadMetaInfoFeature）明确把空值判成
++  // 文件损坏：`if (value_end == value_start) { LOG(ERROR) << "invalid meta info" }`，
++  // 然后整个 perf.data 都读不了。所以写出空值等于写出一个自己读不回的文件。
++  //
++  // 在真设备上不会发生 —— 那几个 android_* 的值来自 ro.* 属性，都有内容。
++  // 但这个二进制是 Android 目标、跑在 ARM64 Linux 上：没有属性服务，
++  // GetProperty() 全返回空串，于是 cmd_record.cpp 那段 #if defined(__ANDROID__)
++  // 会写进 5 个空值（product_props / android_version / android_sdk_version /
++  // android_build_type / android_build_fingerprint），录完的文件当场读不回。
++  //
++  // 官方的 host 版是 glibc 构建，不定义 __ANDROID__，**根本不写这几个键** ——
++  // 跳过空值之后我们的行为跟它一致。
++  //
++  // 两个循环**必须用同一个条件**：上面算长度、下面写内容，漏掉一处 buf 就会
++  // 算错大小。
+   uint32_t size = 0u;
+   for (auto& pair : info_map) {
++    if (pair.second.empty()) {
++      continue;
++    }
+     size += pair.first.size() + 1;
+     size += pair.second.size() + 1;
+   }
+   std::vector<char> buf(size);
+   char* p = buf.data();
+   for (auto& pair : info_map) {
++    if (pair.second.empty()) {
++      continue;
++    }
+     MoveToBinaryFormat(pair.first.c_str(), pair.first.size() + 1, p);
+     MoveToBinaryFormat(pair.second.c_str(), pair.second.size() + 1, p);
+   }

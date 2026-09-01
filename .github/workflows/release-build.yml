@@ -1,0 +1,148 @@
+# 在 CI 上出发布物。手动触发。
+#
+# ---------------------------------------------------------------------------
+# **为什么切成这么多 job**
+#
+# GitHub 托管 runner 只有 14 GB 盘，而整条链一次做完放不下。但**每个 job 都是
+# 一台全新的机器**，所以按阶段切开，每段各自装得下（本机实测的峰值）：
+#
+#   llvm         源码 2.1 + build 3.5 + 装出来 1.7  = 7.2 GB
+#   sdk-tools    源码 2.9 + build 1.5              = 4.4 GB
+#   ndk-package  官方 NDK 3.9 + 工具链 1.7 + 暂存 1.1 ≈ 7 GB
+#   hermesc      源码 0.24                          < 1 GB
+#
+# LLVM 那段还会在装完后 PRUNE_AFTER_INSTALL=1 把 build/ 和源码删掉（实测腾 5 GB），
+# 这样上传 artifact 时盘上只剩 1.7 GB。
+#
+# **另一个便宜**：host 工具（clang/lld/python/hermesc）直接跑在 ubuntu-22.04-arm 上，
+# 它本身就是 glibc 2.35 —— 开发机上那套「在 ubuntu:22.04 容器里编」的机关在这儿
+# 用不着，因为 runner 本身就是老发行版。
+#
+# ⚠️ **这份 workflow 没在 CI 上真跑过**（仓库开源前没有 Actions）。每一步的命令
+# 在本机验过，YAML 的接线没有。第一次跑先看 df 那一步：整个设计建立在
+# 「runner 上确实有 8+ GB 可用」这个还没量过的前提上。
+name: release-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ndk_version:
+        description: 'NDK version to build for'
+        default: '27.1.12297006'
+      build_tools:
+        description: '借清单用的官方 build-tools 版本（只借 jar 和包装脚本）'
+        default: '36.0.0'
+      verify_repro:
+        description: 'NDK 包也打两次验可复现（时间翻倍；SDK 包总是验）'
+        type: boolean
+        default: true
+      allow_clang_skew:
+        description: '容忍 clang 版本偏差（编 r28 这类需要，见 docs/VERSIONS.md）'
+        type: boolean
+        default: false
+
+jobs:
+  llvm:
+    runs-on: ubuntu-22.04-arm      # glibc 2.35 = 我们要的门槛，不用容器
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - name: 先看盘（整个设计的前提）
+        run: df -h / && echo "--- 可用空间就是上面 Avail 那列 ---"
+      - name: 腾地方
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
+          df -h /
+      - name: 依赖
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang lld cmake ninja-build git curl unzip zip python3 python3-dev
+      - name: 取官方 NDK（当 sysroot 和清单的供体）
+        run: |
+          tools/fetch-google-package.sh "ndk;${{ inputs.ndk_version }}" "$RUNNER_TEMP/ndk"
+          echo "ANDROID_NDK_HOME=$(ls -d $RUNNER_TEMP/ndk/*/ | head -1)" >> "$GITHUB_ENV"
+      - name: 编 python3
+        run: WORK="$RUNNER_TEMP/work" tools/build-python.sh
+      - name: 编 LLVM（装完就把中间文件删掉）
+        env:
+          PRUNE_AFTER_INSTALL: '1'
+          ALLOW_CLANG_VER_SKEW: ${{ inputs.allow_clang_skew && '1' || '0' }}
+        run: WORK="$RUNNER_TEMP/work" tools/build-llvm.sh
+      - name: 打包产物给下一个 job
+        run: tar -C "$RUNNER_TEMP/work/out" -czf "$RUNNER_TEMP/toolchain.tar.gz" llvm python3
+      - uses: actions/upload-artifact@v4
+        with: { name: toolchain, path: "${{ runner.temp }}/toolchain.tar.gz" }
+
+  ndk-package:
+    needs: llvm
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq curl unzip zip file python3
+      - uses: actions/download-artifact@v4
+        with: { name: toolchain, path: "${{ runner.temp }}" }
+      - name: 铺开工具链 + 取官方 NDK
+        run: |
+          mkdir -p "$RUNNER_TEMP/work/out"
+          tar -C "$RUNNER_TEMP/work/out" -xzf "$RUNNER_TEMP/toolchain.tar.gz"
+          tools/fetch-google-package.sh "ndk;${{ inputs.ndk_version }}" "$RUNNER_TEMP/ndk"
+      - name: 装工具链、打补丁、出包
+        run: |
+          N=$(ls -d "$RUNNER_TEMP"/ndk/*/ | head -1); N="${N%/}"
+          rm -rf "$N/toolchains/llvm/prebuilt/linux-aarch64"
+          cp -a "$RUNNER_TEMP/work/out/llvm/linux-aarch64" "$N/toolchains/llvm/prebuilt/"
+          X="$N/toolchains/llvm/prebuilt/linux-x86_64"; T="$N/toolchains/llvm/prebuilt/linux-aarch64"
+          rm -rf "$T/sysroot" "$T/lib/clang"
+          cp -a "$X/sysroot" "$T/sysroot"; cp -a "$X/lib/clang" "$T/lib/clang"
+          tools/patch-ndk.sh "$N"
+          if [ "${{ inputs.verify_repro }}" = "true" ]; then
+            # 打两次比 sha256。目录拷完包就删，峰值仍是一份（~3.5 GB），
+            # 但时间翻倍 —— 所以做成开关，日常构建可以关掉。
+            WORK="$RUNNER_TEMP/work" tools/check-reproducible.sh --ndk "$N"
+          else
+            WORK="$RUNNER_TEMP/work" tools/make-ndk-dist.sh --ours-only "$N"
+          fi
+      - uses: actions/upload-artifact@v4
+        with: { name: ndk-package, path: "${{ runner.temp }}/work/android-ndk-*-ours.tar.gz" }
+
+  sdk-tools:
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 180
+    needs: ndk-package          # 编 SDK 那批要用我们自己的 NDK（官方那份是 x86_64）
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake ninja-build git curl unzip zip file python3 protobuf-compiler
+      - uses: actions/download-artifact@v4
+        with: { name: ndk-package, path: "${{ runner.temp }}" }
+      - name: 铺开我们的 NDK
+        run: |
+          mkdir -p "$RUNNER_TEMP/sdk"
+          tar -C "$RUNNER_TEMP/sdk" -xzf "$RUNNER_TEMP"/android-ndk-*-ours.tar.gz
+          echo "ANDROID_NDK_HOME=$(ls -d $RUNNER_TEMP/sdk/ndk/*/ | head -1)" >> "$GITHUB_ENV"
+      - name: 取源码并逐个编
+        run: |
+          for t in aapt2 aapt aidl dexdump split-select zipalign adb etc1tool fastboot \
+                   hprof-conv make_f2fs make_f2fs_casefold mke2fs sqlite3; do
+            WORK="$RUNNER_TEMP/work" tools/build-$t.sh || exit 1
+          done
+      - name: 出包（只含我们编的）
+        run: |
+          # make-dist.sh 要一份**官方** SDK 借跟架构无关的那部分（d8.jar、
+          # apksigner.jar、包装脚本、NOTICE.txt）。它只看 build-tools/<rev>/ 和
+          # platform-tools/ 两个目录，所以直接摆出来就行，不用 sdkmanager。
+          O="$RUNNER_TEMP/official-sdk"
+          tools/fetch-google-package.sh "build-tools;${{ inputs.build_tools }}" "$O/bt-tmp"
+          # zip 解出来的目录名是**代号**（android-16），SDK 布局要的是版本号
+          mv "$(ls -d "$O"/bt-tmp/*/ | head -1)" "$O/build-tools-tmp"
+          mkdir -p "$O/build-tools"
+          mv "$O/build-tools-tmp" "$O/build-tools/${{ inputs.build_tools }}"
+          rmdir "$O/bt-tmp"
+          tools/fetch-google-package.sh "platform-tools" "$O/pt-tmp"
+          mv "$O/pt-tmp/platform-tools" "$O/platform-tools"
+          rmdir "$O/pt-tmp"
+          # 用 check-reproducible.sh 而不是直接 make-dist.sh：它**打两次比 sha256**，
+          # 产物照样留在 $WORK 里。发布包的校验和只有在能被独立复现时才有意义，
+          # 所以这一步顺便就是那个证明。SDK 包铺开只有 ~100 MB，打两次的开销可以忽略。
+          ANDROID_HOME="$RUNNER_TEMP/official-sdk" WORK="$RUNNER_TEMP/work" \
+            tools/check-reproducible.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: sdk-package, path: "${{ runner.temp }}/work/android-sdk-linux-arm64-*-ours.tar.gz" }

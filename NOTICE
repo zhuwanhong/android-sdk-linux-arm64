@@ -1,0 +1,30 @@
+android-sdk-linux-arm64
+Copyright 2026 zhuwanhong
+
+This product includes software developed as part of the Android Open Source
+Project (https://source.android.com), licensed under the Apache License,
+Version 2.0, and the LLVM Project (https://llvm.org), licensed under the
+Apache License 2.0 with LLVM Exceptions.
+
+WHAT THIS REPOSITORY CONTAINS
+    Build recipes (shell scripts, CMake files, patches) written for this
+    project. These are licensed under Apache-2.0; see LICENSE.
+
+WHAT THE RELEASE ARTIFACTS CONTAIN
+    Only binaries compiled from third-party source in this project's build:
+
+      * Android platform tools and build tools, compiled from AOSP source at
+        tag platform-tools-35.0.2 (Apache-2.0)
+      * clang / lld / llvm-* and a bundled CPython, compiled from the
+        LLVM Project branch llvm-r522817 and AOSP external/python/cpython3
+        (Apache-2.0 with LLVM Exceptions; PSF License for CPython)
+      * hermesc, compiled from facebook/hermes (MIT)
+
+    The release artifacts deliberately do NOT contain files redistributed
+    from Google's Android SDK or NDK downloads. Those are fetched from
+    Google by tools/install.sh at install time, under Google's own terms.
+
+TRADEMARKS
+    Android is a trademark of Google LLC. This project is not affiliated
+    with, endorsed by, or sponsored by Google LLC or the Android Open Source
+    Project. It redistributes no Google-signed or Google-branded artifacts.

@@ -1,0 +1,65 @@
+# 真编一个工具出来，证明构建机器还转得动 —— 手动触发 + 每月一次。
+#
+# 为什么不放进每次 push：要下一份官方 NDK（几百 MB）再取源码树，太重。
+# 为什么必须有：ci-checks.sh 那批全是**静态检查**，一行代码都没编译过。
+# 「脚本语法对」不等于「编得出东西」—— 这个仓库栽过同形的跟头
+# （build-adb.sh 六步全绿，而那份 adb 根本起不了服务器）。
+#
+# 挑 hprof-conv：只取一棵稀疏树（dalvik/tools/hprof-conv），最便宜，
+# 但走的是**完整链路** —— 取树 → cmake → 用 NDK 交叉编 → 验收跟官方产物比对。
+name: smoke-build
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 1 * *'   # 每月 1 号
+
+jobs:
+  build-one-tool:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 系统依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang lld cmake ninja-build git curl unzip python3 zip
+
+      - name: 取官方 NDK（只当 sysroot 和清单的来源）
+        run: |
+          # **别写死 zip 名**：r27b 这个字母会随小版本变，写死了 CI 会一直
+          # 拿着旧 NDK 编，而 tools/ 里的版本已经往前走了。版本号从
+          # tools/build-common.sh 读，地址问 manifest 要。
+          V=$(sed -n 's/^NDK_DEFAULT_VER=//p' tools/build-common.sh | head -1)
+          [ -n "$V" ] || { echo "tools/build-common.sh 里读不出 NDK_DEFAULT_VER"; exit 1; }
+          echo "NDK $V" 
+          tools/fetch-google-package.sh "ndk;$V" "$RUNNER_TEMP/ndk"
+          echo "ANDROID_NDK_HOME=$(ls -d "$RUNNER_TEMP"/ndk/*/ | head -1 | sed 's:/$::')" >> "$GITHUB_ENV"
+
+      - name: 搭薄壳工具链（自举）
+        # **先有鸡还是先有蛋**：我们的工具都是用 NDK 编的，而官方 NDK 的 host
+        # 工具链是 x86_64 的，在 ARM64 runner 上跑不起来。薄壳把系统 clang
+        # 包一层当 host 工具链用，够把第一个工具编出来。见 README 第四节。
+        run: tools/make-shim-toolchain.sh "$ANDROID_NDK_HOME"
+
+      - name: 编 hprof-conv 并验收
+        run: WORK="$RUNNER_TEMP/work" tools/build-hprof-conv.sh
+
+      - name: 上游补丁状态（退出码 10 = 上游变了，不当失败）
+        # 结论会过期：上游修掉某处之后，我们该做的是删补丁 + 升 tag。
+        # 手写的结论没人回头复核，跑得起来的检查才会。
+        run: |
+          set +e
+          tools/check-upstream-patches.sh; rc=$?
+          if [ $rc = 10 ]; then
+            echo "::warning::上游状态变了，见 patches/UPSTREAM.md"; exit 0
+          fi
+          exit $rc
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hprof-conv-aarch64
+          path: ${{ runner.temp }}/work/out/hprof-conv
+          if-no-files-found: warn

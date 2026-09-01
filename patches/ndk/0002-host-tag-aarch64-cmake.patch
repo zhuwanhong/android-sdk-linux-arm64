@@ -1,0 +1,66 @@
+Subject: [PATCH 2/2] CMake: 按 host CPU 选 linux-aarch64
+
+android.toolchain.cmake 的 Linux 分支连 host CPU 都不判，直接写死
+linux-x86_64。加一层 CMAKE_HOST_SYSTEM_PROCESSOR 判断。
+
+**两个文件都要改。** android.toolchain.cmake 里那个 ANDROID_HOST_TAG 块，
+在默认配置下根本执行不到——文件开头会转去 legacy：
+
+    if(DEFINED ANDROID_USE_LEGACY_TOOLCHAIN_FILE)
+      set(_USE_LEGACY_TOOLCHAIN_FILE ${ANDROID_USE_LEGACY_TOOLCHAIN_FILE})
+    else()
+      # Default to the legacy toolchain file ...
+      set(_USE_LEGACY_TOOLCHAIN_FILE true)
+    endif()
+    if(_USE_LEGACY_TOOLCHAIN_FILE)
+      include(".../android-legacy.toolchain.cmake")
+      return()
+    endif()
+
+除非显式传 -DANDROID_USE_LEGACY_TOOLCHAIN_FILE=OFF，真正生效的是
+android-legacy.toolchain.cmake 里的那一份。只改前者等于没改。
+
+用 CMAKE_HOST_SYSTEM_PROCESSOR 是验过的：toolchain file 在 CMake 处理得很早，
+这个变量在那时不一定有值。实测 CMake 3.22.1（Android Studio 的默认版本）和
+4.3 在 toolchain file 里都拿得到。低于 3.22 的没测——如果要支持，先测再说。
+
+匹配 ^(aarch64|arm64)$ 两个拼法：这个变量在 Linux 上取自 uname -m，通常是
+aarch64，个别系统报 arm64。
+
+没有加「目录不存在就回退到 x86_64」的兜底，是故意的：ARM64 机器上找不到
+linux-aarch64 工具链，就应该报找不到，而不是悄悄去用一份跑不起来的 x86_64。
+
+验收：tools/verify-claims.sh 会检查这一条。摘掉补丁它就变 BLOCK。
+---
+diff --git a/build/cmake/android.toolchain.cmake b/build/cmake/android.toolchain.cmake
+--- a/build/cmake/android.toolchain.cmake
++++ b/build/cmake/android.toolchain.cmake
+@@ -273,7 +273,11 @@
+ set(_ANDROID_EXPORT_COMPATIBILITY_VARIABLES TRUE)
+ 
+ if(CMAKE_HOST_SYSTEM_NAME STREQUAL Linux)
+-  set(ANDROID_HOST_TAG linux-x86_64)
++  if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
++    set(ANDROID_HOST_TAG linux-aarch64)
++  else()
++    set(ANDROID_HOST_TAG linux-x86_64)
++  endif()
+ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL Darwin)
+   set(ANDROID_HOST_TAG darwin-x86_64)
+ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL Windows)
+diff --git a/build/cmake/android-legacy.toolchain.cmake b/build/cmake/android-legacy.toolchain.cmake
+--- a/build/cmake/android-legacy.toolchain.cmake
++++ b/build/cmake/android-legacy.toolchain.cmake
+@@ -372,7 +372,11 @@
+ endif()
+ 
+ if(CMAKE_HOST_SYSTEM_NAME STREQUAL Linux)
+-  set(ANDROID_HOST_TAG linux-x86_64)
++  if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
++    set(ANDROID_HOST_TAG linux-aarch64)
++  else()
++    set(ANDROID_HOST_TAG linux-x86_64)
++  endif()
+ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL Darwin)
+   set(ANDROID_HOST_TAG darwin-x86_64)
+ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL Windows)

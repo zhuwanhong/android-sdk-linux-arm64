@@ -1,0 +1,13 @@
+// tests/ 下的两个样例工程做成一个多工程构建，共用一个 wrapper。
+// README 第五节把「两个工程都能 ./gradlew assembleRelease」定成 M1 的验收标准，
+// 这份文件就是让那条命令成立的地方。
+pluginManagement {
+    repositories { google(); mavenCentral() }
+}
+dependencyResolutionManagement {
+    repositories { google(); mavenCentral() }
+}
+
+rootProject.name = 'android-sdk-linux-arm64-tests'
+include ':hello-jvm'
+include ':hello-native'

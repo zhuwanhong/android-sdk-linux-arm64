@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">hello-jvm</string>
+    <string name="greeting">hello from jvm</string>
+    <!-- 数组和颜色不是凑数：它们逼着 aapt2 处理 values 里的多种资源类型，
+         也让 R.java 里出现 R.array / R.color，比只有一个 string 压得深。 -->
+    <string-array name="items">
+        <item>a</item>
+        <item>b</item>
+        <item>c</item>
+    </string-array>
+</resources>

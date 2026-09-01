@@ -1,0 +1,16 @@
+# 构建工作区：aapt2 的 AOSP 子模块 + 构建树，好几 GB，不进仓库
+/work/
+
+# 两个样例工程的构建产物：APK、classes/dex、临时 keystore
+/tests/*/build/
+# ndk-build 的产物和中间目录 —— NDK_PROJECT_PATH 指向工程目录，所以落在这里
+/tests/*/libs/
+/tests/*/obj/
+
+# tests/ 那条 Gradle 路的产物和本机配置
+# （build-gradle/ 跟手工流水线的 build/ 错开，两条路互不覆盖）
+/tests/*/build-gradle/
+/tests/*/.cxx/
+/tests/build/
+/tests/.gradle/
+/tests/local.properties

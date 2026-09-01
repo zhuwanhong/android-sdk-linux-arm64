@@ -1,0 +1,69 @@
+#!/bin/sh
+# 提交前确认本地没落后于远端。
+#
+# 为什么是「拦下来」而不是「自动 pull」：pre-commit 跑的时候，要提交的改动
+# 已经在暂存区里了。这时候做 pull --rebase --autostash，autostash 会把暂存区
+# 连根端走，rebase 完再放回工作区——**暂存状态没了**，紧接着的 commit 就没东西
+# 可提交，那次提交会凭空消失。这是实测出来的，不是推测。
+#
+# 「动手前先 pull」这件事，只能在动手前做，没法在提交时补救。
+#
+# 临时绕过：git commit --no-verify
+
+set -u
+
+
+# 提交前跑一遍快检查。
+#
+# 为什么加：2026-09-01 提交过一个**过不了自己检查**的状态 —— 新加的
+# tools/repro.sh 是被 source 的、不该有可执行位，但 ci-checks 第 3 步当时按
+# 文件名维护排除名单，没算上它。更要命的是我提交前跑过 ci-checks，是绿的：
+# 那几步都用 git ls-files 取文件，而**未跟踪的新文件它看不见**，直到 git add
+# 之后才进入视野。也就是说新文件恰恰在最需要检查的时候是隐形的。
+# 在这里跑（暂存区已经 add 过了），正好补上那个窗口。
+#
+# --fast 跳过要联网的最后一步；完整的那次在 CI 里跑。
+# 临时绕过：git commit --no-verify
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+if [ -x "$root/tools/ci-checks.sh" ]; then
+  if ! "$root/tools/ci-checks.sh" --fast; then
+    echo "" >&2
+    echo "  ✗ 提交被拦下：tools/ci-checks.sh --fast 没过（上面标了 ✗ 的）。" >&2
+    echo "    修掉再提交，或者 git commit --no-verify 跳过。" >&2
+    exit 1
+  fi
+fi
+
+# 没有上游分支（比如刚建的本地分支）——没什么可比的
+upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) || exit 0
+[ -n "$upstream" ] || exit 0
+
+# 离线时不要挡着提交。加超时，免得没网时干等。
+if command -v timeout >/dev/null 2>&1; then
+  fetch="timeout 20 git fetch --quiet"
+else
+  fetch="git fetch --quiet"
+fi
+if ! $fetch 2>/dev/null; then
+  echo "pre-commit: 连不上远端，跳过落后检查（离线？）" >&2
+  exit 0
+fi
+
+behind=$(git rev-list --count "HEAD..$upstream" 2>/dev/null) || exit 0
+[ "$behind" -gt 0 ] 2>/dev/null || exit 0
+
+cat >&2 <<MSG
+
+  ✗ 提交被拦下：本地落后 $upstream $behind 个提交。
+
+    先同步，再提交：
+
+        git stash            # 如果有没提交完的改动
+        git pull --rebase
+        git stash pop
+        git add -A && git commit ...
+
+    （确定要跳过：git commit --no-verify）
+
+MSG
+exit 1

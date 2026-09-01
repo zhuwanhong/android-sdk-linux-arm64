@@ -1,0 +1,67 @@
+Subject: [PATCH 4/4] ndk-build 的 make 那条路：init.mk 也要认 aarch64
+
+**这一处是真机跑出来的，不是读代码读出来的。** 前三个补丁打完，
+ndk-build 已经能跑起来，但真去编一个 .c 文件时报的是：
+
+    .../toolchains/llvm/prebuilt/linux-x86_64/bin/clang: 1: Syntax error: "(" unexpected
+
+注意路径还是 linux-x86_64。那句 "Syntax error" 也不是编译错误——是 shell
+exec 一个 x86_64 ELF 失败（ENOEXEC）之后，退回去把二进制当 shell 脚本解释。
+
+原因：ndk-build 有两条独立的求 tag 路径。
+
+  ndk_bin_common.sh  →  只用来找 python/make 那些辅助程序（补丁 0001 修的）
+  build/core/init.mk →  算 HOST_TAG64，喂给 TOOLCHAIN_ROOT，**真正决定用哪个 clang**
+
+而 init.mk 这一处压根不问 uname：
+
+    HOST_ARCH := x86          # 无条件
+    HOST_ARCH64 := x86_64     # 无条件
+    ...
+    HOST_TAG64 := $(HOST_OS_BASE)-$(HOST_ARCH64)      # → linux-x86_64
+    TOOLCHAIN_ROOT := $(NDK_ROOT)/toolchains/llvm/prebuilt/$(HOST_TAG64)
+
+前面几轮的 verify-claims 没抓到它，因为脚本 grep 的是字面量 "linux-x86_64"，
+而这里是拼出来的。已经补了针对性检查。
+
+改法：在那两行硬编码后面加一段，Linux 上按 uname -m 覆盖。
+
+**只限 Linux。** macOS ARM 的 uname -m 也是 arm64，但 NDK 在那边故意保留
+darwin-x86_64 这个 tag（那些二进制是 universal 的）。不加这个 ifeq 会把
+macOS ARM 打坏。
+
+HOST_ARCH 和 HOST_ARCH64 都设成 aarch64：非 64 的 HOST_TAG 只在一处
+`ifeq ($(HOST_TAG),windows-x86)` 判断里用到，设成 linux-aarch64 无影响；
+HOST_TAG64 才是喂 TOOLCHAIN_ROOT 的那个。查过全部引用点。
+
+顺带记一笔：init.mk 里 `ifndef HOST_ARCH` 那个 else 分支写着
+"Host CPU from environment"——也就是说 **HOST_ARCH 可以从环境覆盖**。
+打补丁前用 `HOST_ARCH=aarch64 ndk-build ...` 就能验证这条路通不通，
+不用改任何文件。
+
+验收：tools/verify-claims.sh 会检查这一条。摘掉补丁它就变 BLOCK。
+---
+diff --git a/build/core/init.mk b/build/core/init.mk
+--- a/build/core/init.mk
++++ b/build/core/init.mk
+@@ -230,6 +230,20 @@
+     endif
+     HOST_ARCH := x86
+     HOST_ARCH64 := x86_64
++    # The NDK has only ever shipped x86_64 Linux host binaries, so hardcoding
++    # the values above was safe. On an aarch64 host it is not: HOST_TAG64 feeds
++    # TOOLCHAIN_ROOT, so ndk-build ends up exec'ing x86_64 ELFs (which surfaces
++    # as a shell syntax error, not as a clear "wrong architecture").
++    #
++    # Only Linux. macOS ARM reports arm64 too, but the NDK deliberately keeps
++    # the darwin x86_64 tag there because those binaries are universal.
++    ifeq ($(HOST_OS_BASE),linux)
++        HOST_UNAME_MACHINE := $(shell uname -m 2>/dev/null)
++        ifneq (,$(filter aarch64 arm64,$(HOST_UNAME_MACHINE)))
++            HOST_ARCH := aarch64
++            HOST_ARCH64 := aarch64
++        endif
++    endif
+ else
+     $(call ndk_log,Host CPU from environment: $(HOST_ARCH))
+ endif

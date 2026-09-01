@@ -1,0 +1,46 @@
+#!/bin/sh
+# 提交后自动推送。
+#
+# 推送失败不会让提交失败——提交已经做完了，这里只负责把它送出去，
+# 送不出去就说清楚，让你自己决定怎么办。
+
+set -u
+
+git_dir=$(git rev-parse --git-dir 2>/dev/null) || exit 0
+
+# rebase / merge / cherry-pick 进行中：中途推送会把半成品推出去
+for marker in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+  if [ -e "$git_dir/$marker" ]; then
+    echo "post-commit: $marker 进行中，不推送。" >&2
+    exit 0
+  fi
+done
+
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || exit 0
+if [ "$branch" = "HEAD" ]; then
+  echo "post-commit: 处于 detached HEAD，不推送。" >&2
+  exit 0
+fi
+
+if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+  out=$(git push --quiet 2>&1); rc=$?
+else
+  out=$(git push --quiet --set-upstream origin "$branch" 2>&1); rc=$?
+fi
+
+if [ "$rc" -eq 0 ]; then
+  echo "post-commit: 已推送 $branch"
+else
+  cat >&2 <<MSG
+
+  ⚠ post-commit: $branch 推送失败。提交是好的，只是没送出去。
+
+$out
+
+    多半是远端又有新提交了。收拾办法：
+
+        git pull --rebase --autostash && git push
+
+MSG
+fi
+exit 0

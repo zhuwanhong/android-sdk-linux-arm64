@@ -1,0 +1,19 @@
+# 每次 push / PR 都跑的快检查。不编译、不下大树、不需要设备。
+#
+# **逻辑全在 tools/ci-checks.sh 里**，这份 YAML 只是薄壳 —— 那个脚本在本机
+# 就能跑能验，不是一份推上去才知道对不对的配置。
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    # 公共仓库有免费的 ARM64 runner。**这个项目必须在 ARM64 上验**：
+    # 整个仓库的存在理由就是「x86 上编过了什么都不证明」（README 第五节第 1 条）。
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: 快检查
+        run: tools/ci-checks.sh

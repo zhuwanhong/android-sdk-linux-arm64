@@ -1,0 +1,43 @@
+--- a/client/main.cpp
++++ b/client/main.cpp
+@@ -25,6 +25,29 @@
+ 
+ #include <thread>
+ 
++// BEGIN android-sdk-linux-arm64: 关掉 fdsan（只对「跑在 Linux 上的 host adb」）
++//
++// 我们这份 adb 是**静态 bionic**，所以带着 bionic 独有的 fdsan（文件描述符
++// 所有权检查）。官方发的 Linux adb 是 glibc 编的，glibc 根本没有这套东西。
++// 上游代码里有一处 fd 所有权的潜在问题（某个 unique_fd 拥有的 fd 被裸 close
++// 关掉，标记没清），在 glibc 上永远看不见，在我们这儿就是**服务器一起就 abort**：
++//
++//   auth.cpp:391 adb_auth_inotify_init...
++//   fdsan: failed to exchange ownership of file descriptor:
++//          fd 10 is owned by unique_fd 0x…, was expected to be unowned
++//
++// strace 实测（2026-08-30，本机 6/6 必现）：同一个 fd 号先被 openat 拿去读
++// ~/.android/adbkey，关掉之后被 inotify_init1 复用，fdevent_create 接管时撞上
++// 残留的所有权标记。同时另有线程在密集 socket()/close() 扫端口，是个竞态。
++//
++// 这里把 fdsan 关掉，让这份二进制的行为**跟官方 glibc 那份一致**。
++// 这是缓解不是根治：那个裸 close 还在上游代码里。要查它就把下面改成
++// ANDROID_FDSAN_ERROR_LEVEL_WARN_ONCE，能看见报警又不会中止。
++// END android-sdk-linux-arm64
++#if defined(__BIONIC__) && defined(ADB_HOST)
++#include <android/fdsan.h>
++#endif
++
+ #include <android-base/errors.h>
+ #include <android-base/file.h>
+ #include <android-base/logging.h>
+@@ -241,6 +264,10 @@
+ }
+ 
+ int main(int argc, char* argv[], char* envp[]) {
++#if defined(__BIONIC__) && defined(ADB_HOST)
++    // 理由见文件开头那段。必须在任何 fd 操作之前。
++    android_fdsan_set_error_level(ANDROID_FDSAN_ERROR_LEVEL_DISABLED);
++#endif
+     __adb_argv = const_cast<const char**>(argv);
+     __adb_envp = const_cast<const char**>(envp);
+     adb_trace_init(argv);

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 由 tools/make-repo.sh 的说明搭的：xmllint 一次只吃一个 schema，
+     而 repository2-3.xml 用了四个命名空间，所以拿这个空壳把它们 import 到一起。
+     四份 xsd 都是从 cmdline-tools 的 jar 里原样取出来的，没改。 -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:import namespace="http://schemas.android.com/sdk/android/repo/repository2/03"
+             schemaLocation="sdk-repository-03.xsd"/>
+  <xs:import namespace="http://schemas.android.com/sdk/android/repo/common/03"
+             schemaLocation="sdk-common-03.xsd"/>
+  <xs:import namespace="http://schemas.android.com/repository/android/common/02"
+             schemaLocation="repo-common-02.xsd"/>
+  <xs:import namespace="http://schemas.android.com/repository/android/generic/02"
+             schemaLocation="generic-02.xsd"/>
+</xs:schema>

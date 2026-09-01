@@ -1,0 +1,69 @@
+Subject: [PATCH 5/5] HOST_PYTHON 找不到时别静默降级
+
+**这个补丁跟前四个不是一类。** 前四个补的是「NDK 只认 linux-x86_64」，
+是 aarch64 专属的。这一个跟架构无关，补的是上游一处**错误方向是静默的**设计。
+
+init.mk 原文：
+
+    ifndef HOST_PYTHON
+        HOST_PYTHON := python
+    endif
+
+Ubuntu 22.04 以后没有 `python` 这个名字（只有 `python3`）。于是 HOST_PYTHON
+指向一个不存在的命令，而 ndk-build 里所有用它的地方都是 `$(shell ...)` ——
+**命令不存在时 $(shell) 返回空串，不报错、不中断**。
+
+后果不是「编不出来」，是「编出来的不对」：
+
+    build/core/sanitizers.mk:25   NDK_SANITIZERS 变成空。
+                                  这条是 setup-toolchain.mk 无条件 include 的，
+                                  **每次 ndk-build 都会跑**。要 -fsanitize 的时候
+                                  运行时库不会被拷进去，而 ndk-build 照样报成功。
+    build/core/setup-app-platform.mk:45,112   APP_PLATFORM 悄悄取默认值
+    build/core/add-application.mk:127         APP_DEBUGGABLE 悄悄取默认值
+
+改法：先试 python3，再试 python，两个都没有就 $(error) 停下来。
+
+**这会改变行为**：今天在一台没有 python/python3 的机器上，ndk-build 是「成功」的
+（只是结果不对）；打完这个补丁它会失败并说清楚原因。这正是想要的 ——
+一次响亮的失败胜过一堆不知道哪里不对的产物。而且不会误伤任何一台装了
+python3 的机器，也就是绝大多数。
+
+顺带说清楚这个补丁跟 python3/ 那个目录的关系：NDK 自带的
+toolchains/llvm/prebuilt/<tag>/python3/ 是一整个 CPython（40 MB）。
+tools/build-llvm.sh 编出来的那份**没有它**，只软链了系统的 python3 ——
+够用（那五个脚本全是标准库，shlex.join 要 >= 3.8），但不自足。
+这个补丁是那件事的兜底：软链断了、或者拿到一台没有 python3 的机器上，
+会当场报错，而不是编出一堆悄悄不对的东西。
+
+验收：tools/patch-ndk.sh --check
+---
+diff --git a/build/core/init.mk b/build/core/init.mk
+--- a/build/core/init.mk
++++ b/build/core/init.mk
+@@ -298,8 +298,24 @@
+ else
+     $(call ndk_log,Host tools prebuilt directory not found, using system tools)
+ endif
++# Upstream falls back to `python`, which does not exist on Ubuntu 22.04+ and
++# most other current distros. Every use of HOST_PYTHON goes through $(shell),
++# and $(shell) returns an empty string for a missing command without failing,
++# so the fallback does not break the build -- it silently produces a wrong one
++# (empty NDK_SANITIZERS, defaulted APP_PLATFORM / APP_DEBUGGABLE).
++#
++# Try python3 first, then python, and stop with a clear message if neither is
++# available. A loud failure beats a pile of quietly-wrong artifacts.
+ ifndef HOST_PYTHON
+-    HOST_PYTHON := python
++    HOST_PYTHON := $(shell command -v python3 2>/dev/null)
++endif
++ifndef HOST_PYTHON
++    HOST_PYTHON := $(shell command -v python 2>/dev/null)
++endif
++ifndef HOST_PYTHON
++    $(error No Python interpreter found. ndk-build needs one for \
++        ldflags_to_sanitizers.py, extract_platform.py and extract_manifest.py. \
++        Install python3, or set NDK_HOST_PYTHON to an interpreter.)
+ endif
+ 
+ HOST_ECHO := $(strip $(NDK_HOST_ECHO))
