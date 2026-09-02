@@ -15,8 +15,9 @@
 #   8. 用 file(1) 判架构的脚本，先检查过 file 在不在
 #   9. 每个脚本的 step 编号自洽（1..N/N）
 #  10. 打包只许走 repro_tar（发布包要可复现）
-#  11. Gradle wrapper 的 jar 跟官方公布的 sha256 一致（要联网）
-#  12. tools/verify-claims.sh：这个项目的前提还成不成立（要联网）
+#  11. workflow 里对外渲染的字符串（name/description/summary）是英文
+#  12. Gradle wrapper 的 jar 跟官方公布的 sha256 一致（要联网）
+#  13. tools/verify-claims.sh：这个项目的前提还成不成立（要联网）
 #
 # 这个清单跟下面的 step 一一对应；加检查记得两头都改。
 #
@@ -31,19 +32,19 @@ step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 bad()  { printf '  \033[31m✗\033[0m %s\n' "$1"; fail=1; }
 
-step "1/12  shell 语法"
+step "1/13  shell 语法"
 n=0; bad_n=0
 while IFS= read -r f; do
   n=$((n+1)); bash -n "$f" 2>/dev/null || { bad "语法错：$f"; bad_n=$((bad_n+1)); }
 done < <(git ls-files '*.sh' '.githooks/*' 'tests/gradlew' 2>/dev/null | grep -vE '\.(bat|jar)$')
 [ "$bad_n" = 0 ] && ok "$n 个脚本语法都过"
 
-step "2/12  没有 CRLF"
+step "2/13  没有 CRLF"
 crlf=$(git ls-files -z '*.sh' '*.py' '*.cmake' '*.patch' '*.mk' '.githooks/*' 2>/dev/null |
        xargs -0 grep -lU $'\r' 2>/dev/null | head -5)
 [ -z "$crlf" ] && ok "没有 CRLF" || bad "这些文件带 CRLF：$(printf '%s ' $crlf)"
 
-step "3/12  可执行位"
+step "3/13  可执行位"
 noexec=""; badexec=""
 for f in $(git ls-files 'tools/*.sh' 'tests/*.sh' 'tests/*/build.sh' '.githooks/*' 2>/dev/null); do
   # **判据是有没有 shebang，不是文件叫什么名字。** 被 source 的库（common.sh、
@@ -60,7 +61,7 @@ done
 [ -z "$badexec" ] || bad "没有 shebang（是被 source 的）却带着可执行位，会误导人直接跑它：$badexec"
 [ -z "$noexec" ] && [ -z "$badexec" ] && ok "该可执行的都可执行，被 source 的都没有可执行位"
 
-step "4/12  管道里的 grep -q（这个仓库栽过三次）"
+step "4/13  管道里的 grep -q（这个仓库栽过三次）"
 # `cmd | grep -q PAT` 在 `set -o pipefail` 下是**竞态**：grep -q 一命中就退出，
 # 上游收到 SIGPIPE，整条管道判成失败 —— **命中反而报错**。
 # 三次实战：llvm-nm 那次、poll /proc/net/tcp 那次、2026-08-31 的
@@ -79,11 +80,11 @@ done
 if [ -z "$bad_pipe" ]; then ok "没有「管道 + grep -q」"; else
   bad "这些地方是竞态（命中可能反而报错），改成 case 或 herestring：$bad_pipe"; fi
 
-step "5/12  PARITY.md ↔ parity.json"
+step "5/13  PARITY.md ↔ parity.json"
 if tools/check-parity.sh >/dev/null 2>&1; then ok "两份一致"; else
   bad "两份走散了，细节："; tools/check-parity.sh 2>&1 | sed 's/^/      /'; fi
 
-step "6/12  所有 .md 里的相对链接"
+step "6/13  所有 .md 里的相对链接"
 missing=""
 # **相对链接要相对它所在的文件解析**，不是相对仓库根。头一版拿 $REPO 解，
 # 于是 docs/INSTALL.md 里的 ../README.md 和 PARITY.md 全被判成指空了 —— 假红。
@@ -98,7 +99,7 @@ done < <(for f in $(git ls-files '*.md'); do
          done | sort -u)
 [ -z "$missing" ] && ok "链接指到的文件都在" || bad "这些链接指空了：$missing"
 
-step "7/12  下 Google 的包只许一个入口"
+step "7/13  下 Google 的包只许一个入口"
 # 同一段 manifest 解析原先在三个脚本里各抄了一份 —— 三份各自会长歪，而且
 # 少了 host-os 过滤就会静默拿到 windows 那个 zip。收成
 # tools/fetch-google-package.sh 一份之后，用这条守住。
@@ -111,7 +112,7 @@ dupes=$(git ls-files 'tools/*.sh' | grep -vE 'fetch-google-package|make-repo|ver
   || bad "这些脚本自己解了一份 manifest，改用 tools/fetch-google-package.sh：
 $(printf '%s\n' "$dupes" | sed 's/^/        /')"
 
-step "8/12  用 file(1) 判架构的脚本，必须先检查 file 在不在"
+step "8/13  用 file(1) 判架构的脚本，必须先检查 file 在不在"
 # 栽过的地方：make-dist.sh 的两道验收都拿 `case "$(file -b …)" in *ELF*)` 当闸门。
 # file 不在 -> 命令替换是空串 -> 每个文件都 continue -> 两道验收双双空转，
 # 打印「host 位置上的 ELF 全是 ARM aarch64」。实测：往包里塞一个真的 x86-64
@@ -127,7 +128,7 @@ done
 [ -z "$nofilechk" ] && ok "用 file 判架构的脚本都先检查过它在不在" \
   || bad "这些脚本拿 file 判架构却没先检查它在不在（缺了会静默报绿）：$nofilechk"
 
-step "9/12  step 编号自洽"
+step "9/13  step 编号自洽"
 # build-adb.sh 出现过 1/6…4/6 之后接 5/7、6/7、7/7；我自己给 ci-checks.sh 加检查时
 # 也把编号撞车过两次。纯文案，但读的人会拿它判断「是不是漏跑了一步」。
 badstep=$(for f in $(git ls-files '*.sh' '.githooks/*' 2>/dev/null); do
@@ -148,7 +149,7 @@ done)
   || bad "step 编号对不上：
 $(printf '%s\n' "$badstep" | sed 's/^/        /')"
 
-step "10/12  打包只许走 repro_tar"
+step "10/13  打包只许走 repro_tar"
 # 发布包要**可复现**：同样的输入，谁在什么时候打，sha256 都一样。直接 `tar -czf`
 # 做不到 —— 文件顺序跟着 readdir 走、mtime 跟着文件系统走、uid/gid 跟着打包的人走。
 # 起因：改完脚本重打了一次 SDK 包，sha256 跟 docs/RELEASE-NOTES.md 里公布的对不上，
@@ -175,14 +176,31 @@ done
 [ -z "$livedate" ] && ok "打包脚本没有把实时时间写进包里（都用 \$REPRO_STAMP）" \
   || bad "打包脚本里有实时时间，包会不可复现：$livedate"
 
+step "11/13  workflow 里对外渲染的字符串是英文"
+# 这个仓库是**故意双语**的：tools/ 和 cmake/ 的注释、docs/zh/ 都是中文，那是推理
+# 发生的地方。但**在 GitHub 界面上渲染出来的字符串是对外的一面**，跟提交信息同类。
+# 实测栽过：workflow_dispatch 的 input description 是中文，别人点 Run workflow
+# 看到的就是一排中文表单；step 的 name 也一样，会出现在每次运行的步骤列表里。
+# 查 name: / description: / 写进 job summary 的标题；YAML 里的 # 注释不查
+# （那跟 tools/ 的注释同类，留中文）。
+cjk=$(grep -nP '^\s*(-\s+)?(name|description):.*[\x{4e00}-\x{9fff}]' .github/workflows/*.yml 2>/dev/null || true)
+cjk2=$(grep -nP 'GITHUB_STEP_SUMMARY|echo "#+ .*[\x{4e00}-\x{9fff}]' .github/workflows/*.yml 2>/dev/null \
+       | grep -P '[\x{4e00}-\x{9fff}]' || true)
+if [ -z "$cjk" ] && [ -z "$cjk2" ]; then
+  ok "workflow 的 name/description/summary 都是英文"
+else
+  bad "这些会显示在 Actions 界面上，要英文：
+$(printf '%s\n%s\n' "$cjk" "$cjk2" | grep -v '^$' | sed 's/^/        /')"
+fi
+
 if [ "$FAST" = 1 ]; then
-  printf '\n\033[2m11/12  Gradle wrapper 的 jar、12/12  项目前提 —— --fast，跳过（都要联网）\033[0m\n'
+  printf '\n\033[2m12/13  Gradle wrapper 的 jar、13/13  项目前提 —— --fast，跳过（都要联网）\033[0m\n'
   printf '\n'
-  [ "$fail" = 0 ] && { printf '\033[32m快检查全过\033[0m（第 11、12 步没跑：要联网）\n'; exit 0; }
+  [ "$fail" = 0 ] && { printf '\033[32m快检查全过\033[0m（第 12、13 步没跑：要联网）\n'; exit 0; }
   printf '\033[31m有问题（上面标了 ✗ 的）\033[0m\n'; exit 1
 fi
 
-step "11/12  Gradle wrapper 的 jar 是官方那份"
+step "12/13  Gradle wrapper 的 jar 是官方那份"
 # 仓库里唯一的二进制文件。gradle-wrapper.jar 是典型的供应链下毒点：
 # 它会在每次 ./gradlew 时被执行，而没人会去读一个 jar。所以别人 clone 之前，
 # 我们自己先对着 Gradle 官方公布的 sha256 核一遍。
@@ -209,7 +227,7 @@ else
   fi
 fi
 
-step "12/12  项目前提还成不成立"
+step "13/13  项目前提还成不成立"
 # **退出码 10 不是失败**：那是「Google 开始发 linux/aarch64 了」——好消息，
 # 但也意味着这个项目该重新评估。CI 里要看得见，不能当红。
 out=$(tools/verify-claims.sh 2>&1); rc=$?

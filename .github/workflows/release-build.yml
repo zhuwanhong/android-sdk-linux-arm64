@@ -27,21 +27,21 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: '从哪个 tag 打，产物也挂到它的 Release 上（例：v1.0.0）'
+        description: 'Tag to build from; artifacts are attached to its Release (e.g. v1.0.0)'
         required: true
         default: 'v1.0.0'
       ndk_version:
         description: 'NDK version to build for'
         default: '27.1.12297006'
       build_tools:
-        description: '借清单用的官方 build-tools 版本（只借 jar 和包装脚本）'
+        description: 'Official build-tools revision to borrow the jars and wrapper scripts from'
         default: '36.0.0'
       verify_repro:
-        description: 'NDK 包也打两次验可复现（时间翻倍；SDK 包总是验）'
+        description: 'Also package the NDK twice to prove reproducibility (doubles the time; the SDK is always checked)'
         type: boolean
         default: true
       allow_clang_skew:
-        description: '容忍 clang 版本偏差（编 r28 这类需要，见 docs/VERSIONS.md）'
+        description: 'Allow a clang version mismatch (needed for r28; see docs/VERSIONS.md)'
         type: boolean
         default: false
 
@@ -54,26 +54,26 @@ jobs:
       # 在 main 上打出来的包属于 main 那个 commit，跟 Release 对不上。
       - uses: actions/checkout@v4
         with: { ref: "${{ inputs.release_tag }}" }
-      - name: 先看盘（整个设计的前提）
+      - name: Disk space (the premise this whole layout rests on)
         run: df -h / && echo "--- 可用空间就是上面 Avail 那列 ---"
-      - name: 腾地方
+      - name: Free up space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/share/boost || true
           df -h /
-      - name: 依赖
+      - name: Dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang lld cmake ninja-build git curl unzip zip python3 python3-dev
-      - name: 取官方 NDK（当 sysroot 和清单的供体）
+      - name: Fetch the official NDK (donor for the sysroot and the manifest)
         run: |
           tools/fetch-google-package.sh "ndk;${{ inputs.ndk_version }}" "$RUNNER_TEMP/ndk"
           echo "ANDROID_NDK_HOME=$(ls -d $RUNNER_TEMP/ndk/*/ | head -1)" >> "$GITHUB_ENV"
-      - name: 编 python3
+      - name: Build python3
         run: WORK="$RUNNER_TEMP/work" tools/build-python.sh
-      - name: 编 LLVM（装完就把中间文件删掉）
+      - name: Build LLVM (prune the build tree once installed)
         env:
           PRUNE_AFTER_INSTALL: '1'
           ALLOW_CLANG_VER_SKEW: ${{ inputs.allow_clang_skew && '1' || '0' }}
         run: WORK="$RUNNER_TEMP/work" tools/build-llvm.sh
-      - name: 打包产物给下一个 job
+      - name: Pass the toolchain to the next job
         run: tar -C "$RUNNER_TEMP/work/out" -czf "$RUNNER_TEMP/toolchain.tar.gz" llvm python3
       - uses: actions/upload-artifact@v4
         with: { name: toolchain, path: "${{ runner.temp }}/toolchain.tar.gz" }
@@ -90,12 +90,12 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq curl unzip zip file python3
       - uses: actions/download-artifact@v4
         with: { name: toolchain, path: "${{ runner.temp }}" }
-      - name: 铺开工具链 + 取官方 NDK
+      - name: Unpack the toolchain and fetch the official NDK
         run: |
           mkdir -p "$RUNNER_TEMP/work/out"
           tar -C "$RUNNER_TEMP/work/out" -xzf "$RUNNER_TEMP/toolchain.tar.gz"
           tools/fetch-google-package.sh "ndk;${{ inputs.ndk_version }}" "$RUNNER_TEMP/ndk"
-      - name: 装工具链、打补丁、出包
+      - name: Graft the toolchain, patch, package
         run: |
           N=$(ls -d "$RUNNER_TEMP"/ndk/*/ | head -1); N="${N%/}"
           rm -rf "$N/toolchains/llvm/prebuilt/linux-aarch64"
@@ -126,18 +126,18 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake ninja-build git curl unzip zip file python3 protobuf-compiler
       - uses: actions/download-artifact@v4
         with: { name: ndk-package, path: "${{ runner.temp }}" }
-      - name: 铺开我们的 NDK
+      - name: Unpack our NDK
         run: |
           mkdir -p "$RUNNER_TEMP/sdk"
           tar -C "$RUNNER_TEMP/sdk" -xzf "$RUNNER_TEMP"/android-ndk-*-ours.tar.gz
           echo "ANDROID_NDK_HOME=$(ls -d $RUNNER_TEMP/sdk/ndk/*/ | head -1)" >> "$GITHUB_ENV"
-      - name: 取源码并逐个编
+      - name: Fetch sources and build each tool
         run: |
           for t in aapt2 aapt aidl dexdump split-select zipalign adb etc1tool fastboot \
                    hprof-conv make_f2fs make_f2fs_casefold mke2fs sqlite3; do
             WORK="$RUNNER_TEMP/work" tools/build-$t.sh || exit 1
           done
-      - name: 出包（只含我们编的）
+      - name: Package (only what we compiled)
         run: |
           # make-dist.sh 要一份**官方** SDK 借跟架构无关的那部分（d8.jar、
           # apksigner.jar、包装脚本、NOTICE.txt）。它只看 build-tools/<rev>/ 和
@@ -169,7 +169,7 @@ jobs:
       - uses: actions/checkout@v4
         with: { ref: "${{ inputs.release_tag }}" }
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq clang lld cmake ninja-build git python3 file
-      - name: 编 hermesc
+      - name: Build hermesc
         run: WORK="$RUNNER_TEMP/work" tools/build-hermesc.sh
       - uses: actions/upload-artifact@v4
         with: { name: hermesc-package, path: "${{ runner.temp }}/work/hermesc-*-linux-aarch64.tar.gz" }
@@ -187,12 +187,12 @@ jobs:
         with: { ref: "${{ inputs.release_tag }}" }
       - uses: actions/download-artifact@v4
         with: { path: dist }
-      - name: 算 sha256，写进 job summary
+      - name: Checksums, into the job summary
         run: |
           find dist -name '*.tar.gz' | sort > files.txt
           [ -s files.txt ] || { echo "一个包都没下到，前面的 job 有问题"; exit 1; }
           {
-            echo "### 产物（发布页上的表照这个填）"
+            echo "### Artifacts — fill the table in docs/RELEASE-NOTES.md from this"
             echo
             echo "| File | Bytes | sha256 |"
             echo "|---|---:|---|"
@@ -201,7 +201,7 @@ jobs:
                 "$(basename "$f")" "$(stat -c%s "$f")" "$(sha256sum "$f" | cut -d" " -f1)"
             done < files.txt
           } | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: 挂到 Release 上
+      - name: Attach to the Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

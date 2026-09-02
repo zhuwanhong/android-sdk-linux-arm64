@@ -21,12 +21,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 系统依赖
+      - name: Dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq clang lld cmake ninja-build git curl unzip python3 zip
 
-      - name: 取官方 NDK（只当 sysroot 和清单的来源）
+      - name: Fetch the official NDK (sysroot and manifest only)
         run: |
           # **别写死 zip 名**：r27b 这个字母会随小版本变，写死了 CI 会一直
           # 拿着旧 NDK 编，而 tools/ 里的版本已经往前走了。版本号从
@@ -37,16 +37,16 @@ jobs:
           tools/fetch-google-package.sh "ndk;$V" "$RUNNER_TEMP/ndk"
           echo "ANDROID_NDK_HOME=$(ls -d "$RUNNER_TEMP"/ndk/*/ | head -1 | sed 's:/$::')" >> "$GITHUB_ENV"
 
-      - name: 搭薄壳工具链（自举）
+      - name: Shim toolchain (bootstrap)
         # **先有鸡还是先有蛋**：我们的工具都是用 NDK 编的，而官方 NDK 的 host
         # 工具链是 x86_64 的，在 ARM64 runner 上跑不起来。薄壳把系统 clang
         # 包一层当 host 工具链用，够把第一个工具编出来。见 README 第四节。
         run: tools/make-shim-toolchain.sh "$ANDROID_NDK_HOME"
 
-      - name: 编 hprof-conv 并验收
+      - name: Build hprof-conv and accept it
         run: WORK="$RUNNER_TEMP/work" tools/build-hprof-conv.sh
 
-      - name: 上游补丁状态（退出码 10 = 上游变了，不当失败）
+      - name: Upstream patch status (exit 10 = upstream moved, not a failure)
         # 结论会过期：上游修掉某处之后，我们该做的是删补丁 + 升 tag。
         # 手写的结论没人回头复核，跑得起来的检查才会。
         run: |

@@ -105,11 +105,17 @@ That file is more valuable than any individual build recipe here.
 Small commits, and **say why, not what** — the diff already says what. Where a
 number appears (sizes, timings, exit codes), it should be one you measured.
 
-Write commit messages in **English**. The rest of the repository is
-deliberately bilingual — comments in `tools/` and `cmake/` and the originals in
-`docs/zh/` are Chinese, because that is where the reasoning was worked out — but
-the commit log is a public surface (it is what GitHub shows first, and what
-`git log` gives anyone who clones), so it stays in one language.
+**Anything GitHub renders as UI is English**: commit messages, workflow input
+descriptions, step names, job summaries, and everything under `docs/` outside
+`docs/zh/`. The rest of the repository is deliberately bilingual — comments in
+`tools/`, `cmake/` and the workflow YAML, and the originals in `docs/zh/`, are
+Chinese, because that is where the reasoning was worked out.
+
+The line is *rendered as interface* versus *written in a file*: a reader who
+clicks "Run workflow" should not be shown a form in a language the README is not
+in, while a reader deep enough in `tools/build-llvm.sh` to read its comments has
+already chosen to read the source. `tools/ci-checks.sh` enforces the first half
+(step 11); the second half is deliberate, not an oversight.
 
 ## License
 
