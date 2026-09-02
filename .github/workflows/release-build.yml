@@ -40,6 +40,10 @@ on:
       build_tools:
         description: 'Official build-tools revision to borrow the jars and wrapper scripts from'
         default: '36.0.0'
+      ndk_only:
+        description: 'Build and attach only the NDK for this version, leaving the other assets in place (use for a second NDK version)'
+        type: boolean
+        default: false
       verify_repro:
         description: 'Also package the NDK twice to prove reproducibility (doubles the time; the SDK is always checked)'
         type: boolean
@@ -70,6 +74,15 @@ jobs:
         run: |
           tools/fetch-google-package.sh "ndk;${{ inputs.ndk_version }}" "$RUNNER_TEMP/ndk"
           echo "ANDROID_NDK_HOME=$(ls -d $RUNNER_TEMP/ndk/*/ | head -1)" >> "$GITHUB_ENV"
+      - name: Work out which LLVM branch this NDK wants
+        run: |
+          # **不能用 build-llvm.sh 的默认值**：那是写死的 r27.1
+          # （llvm-r522817 / 18.0.2）。换个 NDK 版本却不换这三个值，编出来的是
+          # 上一个版本的 clang，而包装出去看不出来 —— 而且 r28 必须开
+          # allow_clang_skew，那个开关恰好会把 build-llvm.sh 里的版本核对压掉，
+          # 于是没有任何检查会拦。所以在这里就把三个值算对。
+          tools/resolve-llvm-pin.sh "$ANDROID_NDK_HOME" >> "$GITHUB_ENV"
+          echo "--- 这一轮用的 ---"; grep -E 'LLVM_BRANCH|NDK_CLANG' "$GITHUB_ENV"
       - name: Build python3
         run: WORK="$RUNNER_TEMP/work" tools/build-python.sh
       - name: Build LLVM (prune the build tree once installed)
@@ -115,6 +128,7 @@ jobs:
         with: { name: ndk-package, path: "${{ runner.temp }}/work/android-ndk-*-ours.tar.gz" }
 
   sdk-tools:
+    if: ${{ !inputs.ndk_only }}
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 180
     # 只依赖工具链，不依赖 NDK 包 —— 所以能跟 ndk-package 并行跑。
@@ -179,6 +193,7 @@ jobs:
         with: { name: sdk-package, path: "${{ runner.temp }}/work/android-sdk-linux-arm64-*-ours.tar.gz" }
 
   hermesc:
+    if: ${{ !inputs.ndk_only }}
     # 独立的一条：hermesc 是 React Native 那条链上的 host 工具，不吃 NDK，
     # 只要 cmake/ninja/python3。源码 238 MB、构建 32 MB，盘和时间都不是问题。
     runs-on: ubuntu-22.04-arm
@@ -197,6 +212,13 @@ jobs:
     # docs/RELEASE-NOTES.md 里那张表就照它填（CI 编的二进制跟本机编的不是同一批，
     # 校验和必然不同：可复现的是**打包**，不是编译）。
     needs: [llvm, ndk-package, sdk-tools, hermesc]
+    # ndk_only 时 sdk-tools / hermesc 是 skipped，而 needs 默认把 skipped 也当
+    # 「不满足」—— 不写这个条件，publish 会跟着一起被跳过。
+    if: ${{ always()
+            && needs.llvm.result == 'success'
+            && needs.ndk-package.result == 'success'
+            && (needs.sdk-tools.result == 'success' || needs.sdk-tools.result == 'skipped')
+            && (needs.hermesc.result == 'success' || needs.hermesc.result == 'skipped') }}
     runs-on: ubuntu-22.04-arm
     permissions:
       contents: write        # 只有这个 job 需要写权限；上传用自带的 GITHUB_TOKEN
@@ -242,7 +264,10 @@ jobs:
           # 上去，重跑一轮也带不走。Release 的附件必须跟正文那张表一字不差，
           # 否则用户看着表却下到别的东西。
           # 先传后删：任何时候 Release 上都不会出现「空的」状态。
-          keep=$(xargs -a files.txt -n1 basename | sort)
+          # **按表来，不按这次传了什么。** 只编 NDK 的那种运行不会重新产出 SDK 包，
+          # 按 files.txt 删会把上一轮发的 r27 包、SDK 包全删掉。
+          # notes.md.assets 是渲染脚本合并后的完整清单（表里有哪些文件）。
+          keep=$(cat notes.md.assets)
           for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
             # herestring 不是管道 —— `printf … | grep -q` 在 pipefail 下是竞态，
             # 这个仓库栽过三次（docs/zh/LESSONS.md）。

@@ -57,29 +57,14 @@ if [ -z "$NDK_PATH" ]; then
 fi
 
 step "读目标 NDK 自己记的 clang 版本"
-# **不猜，读它自己写的那个文件。** 官方包里是 linux-x86_64；我们自己打的包里
-# 是 linux-aarch64 —— 两个都认，谁在就读谁。
-av=""
-for c in "$NDK_PATH"/toolchains/llvm/prebuilt/*/AndroidVersion.txt; do [ -f "$c" ] && { av="$c"; break; }; done
-[ -n "$av" ] || die "找不到 AndroidVersion.txt（$NDK_PATH 是一份完整的 NDK 吗？）"
-ver=$(sed -n '1p' "$av" | tr -d ' \r')
-rev=$(sed -n '2p' "$av" | grep -oE 'r[0-9]+[a-z]*' | head -1)
-[ -n "$ver" ] && [ -n "$rev" ] || die "$av 的格式不认识：
-$(head -3 "$av" | sed 's/^/      /')"
-note "AndroidVersion.txt  clang $ver，based on $rev"
-
-# 分支名去掉修订号末尾那个字母：r522817b -> llvm-r522817
-branch="llvm-$(printf '%s' "$rev" | sed 's/[a-z]*$//')"
-step "确认上游真有这个分支"
-# **推出来的名字要去上游验，别假定规则永远成立。**
-_ls=$(git ls-remote --heads "$LLVM_URL" "$branch" 2>/dev/null)   # 不走管道
-if case "$_ls" in *"refs/heads/$branch"*) true ;; *) false ;; esac; then
-  ok "$branch 存在"
-else
-  die "上游没有分支 $branch（从 $rev 推的）。
-    命名规则可能变了。自己看有哪些：
-      git ls-remote --heads $LLVM_URL 'llvm-r*' | tail"
-fi
+# 解析收在 tools/resolve-llvm-pin.sh 里 —— CI 的 llvm job 也要同一份答案，
+# 抄两份迟早长歪（manifest 解析、NDK 嫁接都栽过）。
+step "读目标 NDK 自己记的 clang 版本，推出该编哪条 LLVM 分支"
+pin=$("$REPO/tools/resolve-llvm-pin.sh" "$NDK_PATH") || die "解析 LLVM 分支失败"
+branch=$(printf '%s\n' "$pin" | sed -n 's/^LLVM_BRANCH=//p')
+ver=$(printf '%s\n' "$pin"    | sed -n 's/^NDK_CLANG_VER=//p')
+rev=$(printf '%s\n' "$pin"    | sed -n 's/^NDK_CLANG_REV=//p')
+[ -n "$branch" ] && [ -n "$ver" ] && [ -n "$rev" ] || die "解析结果不完整：$pin"
 
 step "这次要用的三个值"
 note "LLVM_BRANCH=$branch"
