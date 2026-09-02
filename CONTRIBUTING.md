@@ -105,6 +105,12 @@ That file is more valuable than any individual build recipe here.
 Small commits, and **say why, not what** — the diff already says what. Where a
 number appears (sizes, timings, exit codes), it should be one you measured.
 
+Write commit messages in **English**. The rest of the repository is
+deliberately bilingual — comments in `tools/` and `cmake/` and the originals in
+`docs/zh/` are Chinese, because that is where the reasoning was worked out — but
+the commit log is a public surface (it is what GitHub shows first, and what
+`git log` gives anyone who clones), so it stays in one language.
+
 ## License
 
 By contributing you agree your contributions are licensed under Apache-2.0,

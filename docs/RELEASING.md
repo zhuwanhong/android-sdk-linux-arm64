@@ -24,8 +24,23 @@ On github.com, in this repository:
 2. **About** (top right of the file list) → set the description and topics.
    Suggested description: *Android SDK and NDK build tools for ARM64 Linux,
    compiled from AOSP and LLVM source. Google publishes these for linux-x86_64
-   only.* Topics: `android`, `android-sdk`, `android-ndk`, `arm64`, `aarch64`,
-   `linux`, `aosp`, `llvm`, `cross-compilation`, `reproducible-builds`.
+   only.*
+
+   Topics — **enter them one at a time, pressing Enter after each** so that each
+   becomes its own chip. Pasting the whole list in one go makes GitHub treat it
+   as a single topic and reject it ("topics must start with a lowercase letter
+   or number, consist of 50 characters or less"), because a topic cannot contain
+   spaces:
+
+   `android` `android-sdk` `android-ndk` `arm64` `aarch64` `linux` `aosp`
+   `llvm` `cross-compilation` `reproducible-builds`
+
+   Then **Save changes** — and check the result from outside, not from the
+   settings dialog:
+
+   ```bash
+   curl -s https://api.github.com/repos/<owner>/<repo>/topics
+   ```
 3. **Settings → Actions → General → Allow all actions and reusable workflows.**
    Nothing here needs a secret; the workflows only fetch public downloads.
 4. **Settings → Code security → Private vulnerability reporting → Enable.**
