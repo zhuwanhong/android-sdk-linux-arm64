@@ -124,7 +124,11 @@ jobs:
       # 在 main 上打出来的包属于 main 那个 commit，跟 Release 对不上。
       - uses: actions/checkout@v4
         with: { ref: "${{ inputs.release_tag }}" }
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake ninja-build git curl unzip zip file python3 protobuf-compiler
+      # bison/flex 是 aidl 的（它自己 command -v 查）；default-jdk-headless 是
+        # build-adb.sh 那个 Java 子构建和 aidl/dexdump 的 javac 用的。
+        # 这份清单不是猜的：把 14 个 build-*.sh 里的 `command -v` 全扫了一遍对出来的。
+        # qemu-aarch64-static 不要 —— 它只在**非 aarch64** 主机上才会被用到。
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake ninja-build git curl unzip zip file python3 protobuf-compiler default-jdk-headless bison flex
       - uses: actions/download-artifact@v4
         with: { name: toolchain, path: "${{ runner.temp }}" }
       - name: Assemble a usable NDK
@@ -138,6 +142,26 @@ jobs:
           N=$(tools/prepare-ndk.sh "${{ inputs.ndk_version }}" \
                 "$RUNNER_TEMP/work/out/llvm/linux-aarch64" "$RUNNER_TEMP/ndk" | tail -1)
           echo "ANDROID_NDK_HOME=$N" >> "$GITHUB_ENV"
+      - name: Official SDK bits the tool builds need (android.jar, d8)
+        run: |
+          # build-adb.sh 里有个 **Java 子构建**（fastdeploy 的 deployagent）：
+          # tools/gen-deployagent.sh 要 $ANDROID_HOME 下的 platforms/*/android.jar
+          # 和 build-tools/*/d8。两样都是跟架构无关、由 Google 分发的文件。
+          # run #2 就是在这儿红的 —— 开发机上 ANDROID_HOME 一直是设着的，
+          # 所以这个依赖在本机从来没暴露过。
+          # 顺便这份也给后面的打包步骤借 jar 和包装脚本用，摆一次就够。
+          O="$RUNNER_TEMP/official-sdk"
+          tools/fetch-google-package.sh "build-tools;${{ inputs.build_tools }}" "$O/bt-tmp"
+          mkdir -p "$O/build-tools"
+          mv "$(ls -d "$O"/bt-tmp/*/ | head -1)" "$O/build-tools/${{ inputs.build_tools }}"
+          rmdir "$O/bt-tmp"
+          tools/fetch-google-package.sh "platform-tools" "$O/pt-tmp"
+          mv "$O/pt-tmp/platform-tools" "$O/platform-tools"
+          rmdir "$O/pt-tmp"
+          # 目录名用 zip 里原来的就行 —— gen-deployagent.sh 是 glob platforms/*/android.jar
+          tools/fetch-google-package.sh "platforms;android-36" "$O/platforms"
+          ls "$O"/platforms/*/android.jar "$O"/build-tools/*/d8
+          echo "ANDROID_HOME=$O" >> "$GITHUB_ENV"
       - name: Fetch sources and build each tool
         run: |
           for t in aapt2 aapt aidl dexdump split-select zipalign adb etc1tool fastboot \
@@ -146,24 +170,11 @@ jobs:
           done
       - name: Package (only what we compiled)
         run: |
-          # make-dist.sh 要一份**官方** SDK 借跟架构无关的那部分（d8.jar、
-          # apksigner.jar、包装脚本、NOTICE.txt）。它只看 build-tools/<rev>/ 和
-          # platform-tools/ 两个目录，所以直接摆出来就行，不用 sdkmanager。
-          O="$RUNNER_TEMP/official-sdk"
-          tools/fetch-google-package.sh "build-tools;${{ inputs.build_tools }}" "$O/bt-tmp"
-          # zip 解出来的目录名是**代号**（android-16），SDK 布局要的是版本号
-          mv "$(ls -d "$O"/bt-tmp/*/ | head -1)" "$O/build-tools-tmp"
-          mkdir -p "$O/build-tools"
-          mv "$O/build-tools-tmp" "$O/build-tools/${{ inputs.build_tools }}"
-          rmdir "$O/bt-tmp"
-          tools/fetch-google-package.sh "platform-tools" "$O/pt-tmp"
-          mv "$O/pt-tmp/platform-tools" "$O/platform-tools"
-          rmdir "$O/pt-tmp"
+          # $ANDROID_HOME 上一步已经摆好（官方 build-tools + platform-tools），
+          # make-dist.sh 从那儿借跟架构无关的部分。
           # 用 check-reproducible.sh 而不是直接 make-dist.sh：它**打两次比 sha256**，
-          # 产物照样留在 $WORK 里。发布包的校验和只有在能被独立复现时才有意义，
-          # 所以这一步顺便就是那个证明。SDK 包铺开只有 ~100 MB，打两次的开销可以忽略。
-          ANDROID_HOME="$RUNNER_TEMP/official-sdk" WORK="$RUNNER_TEMP/work" \
-            tools/check-reproducible.sh
+          # 产物照样留在 $WORK 里 —— 出包和「可复现」的证明一次完成。
+          WORK="$RUNNER_TEMP/work" tools/check-reproducible.sh
       - uses: actions/upload-artifact@v4
         with: { name: sdk-package, path: "${{ runner.temp }}/work/android-sdk-linux-arm64-*-ours.tar.gz" }
 
