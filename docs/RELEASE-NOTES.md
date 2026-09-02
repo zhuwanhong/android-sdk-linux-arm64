@@ -13,13 +13,13 @@ LLVM source. Google publishes these for `linux-x86_64` only.
 
 ### Artifacts
 
-Built from tag `v1.0.0` (`0111b18`). Packaging is reproducible — see below.
+Built from tag `v1.0.0` (`4c2378b`), by .github/workflows/release-build.yml.
 
 | File | Bytes | sha256 |
 |---|---:|---|
-| `android-sdk-linux-arm64-36.0.0-ours.tar.gz` | 37,990,299 | `6863d7aef7cd6e65722d082a84c365123355c76c2fdf9f207436d593ebeeafb6` |
-| `android-ndk-27.1.12297006-linux-aarch64-ours.tar.gz` | 349,774,896 | `347f1f6df579f90e1b43644eabaeeb062d69c4feaeceeebecc7d4f52b69e839e` |
-| `hermesc-250829098.0.17-linux-aarch64.tar.gz` | 1,664,158 | `c774978153b2ea719a15c5c7a86b6b0753c07d33a40f86afbf6fd979ddc5efb0` |
+| `android-ndk-27.1.12297006-linux-aarch64-ours.tar.gz` | 349,188,275 | `218286f50194da7470e20b4fad261cf05d7923cc8b81613ad09e118052595bb1` |
+| `android-sdk-linux-arm64-36.0.0-ours.tar.gz` | 38,047,751 | `f82700229b117aca7720c227bec1e62259071b5e1f0d60e0569244149aee357a` |
+| `hermesc-250829098.0.17-linux-aarch64.tar.gz` | 1,648,588 | `a9551c476081a48cf668ca146ef6d7143e86c605a774e5d6be69da10d99c4764` |
 
 ### Reproducing these archives
 
