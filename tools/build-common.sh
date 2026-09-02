@@ -303,4 +303,12 @@ common_verify_done() {
     step "这份 $TOOL 是自己编的，可以用了"
     [ -n "${1:-}" ] && echo "$1"
   fi
+  # **必须显式 return 0。** 上面那句 `[ -n "$1" ] && echo` 在参数为空时求值为假，
+  # 函数就返回 1；而它又是各 build-*.sh 的最后一条命令，于是脚本**打着成功横幅
+  # 退出码 1**。传空参数的有 fastboot / simpleperf / aapt2、dexdump、split-select
+  # 的部分分支。
+  # 这个 bug 藏了很久，因为单独跑脚本时人只看输出不看 $?；CI 上循环里写着
+  # `tools/build-$t.sh || exit 1`，第一次把它照出来了 —— 「退出码就是契约」
+  # 这条规矩，自己先违反了。
+  return 0
 }

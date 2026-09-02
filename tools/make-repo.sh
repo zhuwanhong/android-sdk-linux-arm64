@@ -329,4 +329,7 @@ verify_install() {
     || { warn "装完的东西没通过检查（见上）"; return 1; }
   ok "sdkmanager 装上了：$reqs 个请求，2 个二进制都是 aarch64 且真跑过一遍"
 }
-[ "${DO_VERIFY:-0}" = 1 ] && verify_install
+# **末尾这句要收尾**：裸的 `[ … ] && cmd` 在条件为假时整句返回 1，而它是脚本的
+# 最后一条命令 —— DO_VERIFY 默认就是 0，等于这个脚本平时永远退出码 1。
+# 同一个毛病在 build-common.sh 的 common_verify_done() 里咬过一次（CI 上才照出来）。
+if [ "${DO_VERIFY:-0}" = 1 ]; then verify_install; fi
