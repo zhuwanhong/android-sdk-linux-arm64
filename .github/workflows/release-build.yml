@@ -203,8 +203,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { ref: "${{ inputs.release_tag }}" }
+      # **只下要发布的那三个**。不加 pattern 会把 llvm job 传给下游的
+        # toolchain.tar.gz（590 MB 的内部中转物）也下下来，跟着挂到 Release 上 ——
+        # run #4 就这么发出去了一个不该发的附件，而且它还进了正文的产物表。
       - uses: actions/download-artifact@v4
-        with: { path: dist }
+        with:
+          pattern: '*-package'
+          path: dist
       - name: Render the release notes with the measured checksums
         run: |
           find dist -name '*.tar.gz' | sort > files.txt
@@ -232,5 +237,19 @@ jobs:
             gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
           fi
           xargs -a files.txt gh release upload "$TAG" --clobber
+          # **再删掉不在清单里的附件。** --clobber 只覆盖同名的，多传上去的会一直
+          # 留着：run #4 就把 llvm job 的内部中转物 toolchain.tar.gz（590 MB）挂了
+          # 上去，重跑一轮也带不走。Release 的附件必须跟正文那张表一字不差，
+          # 否则用户看着表却下到别的东西。
+          # 先传后删：任何时候 Release 上都不会出现「空的」状态。
+          keep=$(xargs -a files.txt -n1 basename | sort)
+          for a in $(gh release view "$TAG" --json assets --jq '.assets[].name'); do
+            # herestring 不是管道 —— `printf … | grep -q` 在 pipefail 下是竞态，
+            # 这个仓库栽过三次（docs/zh/LESSONS.md）。
+            if ! grep -qx "$a" <<<"$keep"; then
+              echo "removing stale asset: $a"
+              gh release delete-asset "$TAG" "$a" --yes
+            fi
+          done
           gh release view "$TAG" --json isDraft,assets \
             --jq '"draft=\(.isDraft)", (.assets[] | "\(.size)\t\(.name)")'
