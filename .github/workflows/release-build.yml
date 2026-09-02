@@ -194,25 +194,32 @@ jobs:
         with: { ref: "${{ inputs.release_tag }}" }
       - uses: actions/download-artifact@v4
         with: { path: dist }
-      - name: Checksums, into the job summary
+      - name: Render the release notes with the measured checksums
         run: |
           find dist -name '*.tar.gz' | sort > files.txt
-          [ -s files.txt ] || { echo "一个包都没下到，前面的 job 有问题"; exit 1; }
+          [ -s files.txt ] || { echo "no archives came back from the build jobs"; exit 1; }
+          # 逻辑在脚本里，workflow 只当薄壳（跟 ci-checks 同一个道理）：
+          # 这样它在本机能跑能验，而不是一段只有推上去才知道对不对的 YAML。
+          xargs -a files.txt tools/render-release-notes.py \
+            "${{ inputs.release_tag }}" "$(git rev-parse --short HEAD)" notes.md
           {
-            echo "### Artifacts — fill the table in docs/RELEASE-NOTES.md from this"
+            echo "### Artifacts"
             echo
-            echo "| File | Bytes | sha256 |"
-            echo "|---|---:|---|"
-            while IFS= read -r f; do
-              printf '| `%s` | %s | `%s` |\n' \
-                "$(basename "$f")" "$(stat -c%s "$f")" "$(sha256sum "$f" | cut -d" " -f1)"
-            done < files.txt
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Attach to the Release
+            sed -n '/^| File | Bytes | sha256 |/,/^$/p' notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the release and attach the archives
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # --clobber：重跑时覆盖同名附件，而不是失败
-          xargs -a files.txt gh release upload "${{ inputs.release_tag }}" --clobber
-          gh release view "${{ inputs.release_tag }}" --json assets \
-            --jq '.assets[] | "\(.size)\t\(.name)"'
+          TAG="${{ inputs.release_tag }}"
+          # 已经有（哪怕是草稿）就改它并转正；没有就新建。
+          # 草稿这件事踩过：force-push 一个已发布的 tag，GitHub 会把 Release
+          # 降级成草稿，匿名就看不见了。
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file notes.md --draft=false
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+          fi
+          xargs -a files.txt gh release upload "$TAG" --clobber
+          gh release view "$TAG" --json isDraft,assets \
+            --jq '"draft=\(.isDraft)", (.assets[] | "\(.size)\t\(.name)")'
