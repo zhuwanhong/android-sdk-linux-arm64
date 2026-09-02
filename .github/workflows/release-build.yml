@@ -26,6 +26,10 @@ name: release-build
 on:
   workflow_dispatch:
     inputs:
+      release_tag:
+        description: '从哪个 tag 打，产物也挂到它的 Release 上（例：v1.0.0）'
+        required: true
+        default: 'v1.0.0'
       ndk_version:
         description: 'NDK version to build for'
         default: '27.1.12297006'
@@ -46,7 +50,10 @@ jobs:
     runs-on: ubuntu-22.04-arm      # glibc 2.35 = 我们要的门槛，不用容器
     timeout-minutes: 300
     steps:
+      # **必须检出 tag，不是 main**：SOURCE_DATE_EPOCH 默认取 HEAD 的提交时间，
+      # 在 main 上打出来的包属于 main 那个 commit，跟 Release 对不上。
       - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.release_tag }}" }
       - name: 先看盘（整个设计的前提）
         run: df -h / && echo "--- 可用空间就是上面 Avail 那列 ---"
       - name: 腾地方
@@ -76,7 +83,10 @@ jobs:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 120
     steps:
+      # **必须检出 tag，不是 main**：SOURCE_DATE_EPOCH 默认取 HEAD 的提交时间，
+      # 在 main 上打出来的包属于 main 那个 commit，跟 Release 对不上。
       - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.release_tag }}" }
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq curl unzip zip file python3
       - uses: actions/download-artifact@v4
         with: { name: toolchain, path: "${{ runner.temp }}" }
@@ -109,7 +119,10 @@ jobs:
     timeout-minutes: 180
     needs: ndk-package          # 编 SDK 那批要用我们自己的 NDK（官方那份是 x86_64）
     steps:
+      # **必须检出 tag，不是 main**：SOURCE_DATE_EPOCH 默认取 HEAD 的提交时间，
+      # 在 main 上打出来的包属于 main 那个 commit，跟 Release 对不上。
       - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.release_tag }}" }
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake ninja-build git curl unzip zip file python3 protobuf-compiler
       - uses: actions/download-artifact@v4
         with: { name: ndk-package, path: "${{ runner.temp }}" }
@@ -146,3 +159,53 @@ jobs:
             tools/check-reproducible.sh
       - uses: actions/upload-artifact@v4
         with: { name: sdk-package, path: "${{ runner.temp }}/work/android-sdk-linux-arm64-*-ours.tar.gz" }
+
+  hermesc:
+    # 独立的一条：hermesc 是 React Native 那条链上的 host 工具，不吃 NDK，
+    # 只要 cmake/ninja/python3。源码 238 MB、构建 32 MB，盘和时间都不是问题。
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.release_tag }}" }
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq clang lld cmake ninja-build git python3 file
+      - name: 编 hermesc
+        run: WORK="$RUNNER_TEMP/work" tools/build-hermesc.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: hermesc-package, path: "${{ runner.temp }}/work/hermesc-*-linux-aarch64.tar.gz" }
+
+  publish:
+    # 把四个包挂到 Release 上，并把 sha256 表打进 job summary ——
+    # docs/RELEASE-NOTES.md 里那张表就照它填（CI 编的二进制跟本机编的不是同一批，
+    # 校验和必然不同：可复现的是**打包**，不是编译）。
+    needs: [llvm, ndk-package, sdk-tools, hermesc]
+    runs-on: ubuntu-22.04-arm
+    permissions:
+      contents: write        # 只有这个 job 需要写权限；上传用自带的 GITHUB_TOKEN
+    steps:
+      - uses: actions/checkout@v4
+        with: { ref: "${{ inputs.release_tag }}" }
+      - uses: actions/download-artifact@v4
+        with: { path: dist }
+      - name: 算 sha256，写进 job summary
+        run: |
+          find dist -name '*.tar.gz' | sort > files.txt
+          [ -s files.txt ] || { echo "一个包都没下到，前面的 job 有问题"; exit 1; }
+          {
+            echo "### 产物（发布页上的表照这个填）"
+            echo
+            echo "| File | Bytes | sha256 |"
+            echo "|---|---:|---|"
+            while IFS= read -r f; do
+              printf '| `%s` | %s | `%s` |\n' \
+                "$(basename "$f")" "$(stat -c%s "$f")" "$(sha256sum "$f" | cut -d" " -f1)"
+            done < files.txt
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: 挂到 Release 上
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # --clobber：重跑时覆盖同名附件，而不是失败
+          xargs -a files.txt gh release upload "${{ inputs.release_tag }}" --clobber
+          gh release view "${{ inputs.release_tag }}" --json assets \
+            --jq '.assets[] | "\(.size)\t\(.name)"'
