@@ -3,24 +3,28 @@
 # ---------------------------------------------------------------------------
 # **为什么切成这么多 job**
 #
-# GitHub 托管 runner 只有 14 GB 盘，而整条链一次做完放不下。但**每个 job 都是
-# 一台全新的机器**，所以按阶段切开，每段各自装得下（本机实测的峰值）：
+# 原来的理由是「GitHub runner 只有 14 GB 盘」。**那是错的**：第一次真跑（run #1）
+# 量到 runner 上还剩 **115 GB**，宽裕得很。
 #
+# 但分段保留，因为真正需要它的是**开发机**：根盘 45 GB、日常可用十几 GB，整条链
+# 一次做完放不下。CI 跟开发机走同一套分段流程，两边才不会各长各的 —— 如果哪天
+# 所有编译都只在 GitHub 上做了，这个理由才消失。
+#
+# 各段峰值（开发机上实测）：
 #   llvm         源码 2.1 + build 3.5 + 装出来 1.7  = 7.2 GB
 #   sdk-tools    源码 2.9 + build 1.5              = 4.4 GB
 #   ndk-package  官方 NDK 3.9 + 工具链 1.7 + 暂存 1.1 ≈ 7 GB
 #   hermesc      源码 0.24                          < 1 GB
 #
-# LLVM 那段还会在装完后 PRUNE_AFTER_INSTALL=1 把 build/ 和源码删掉（实测腾 5 GB），
-# 这样上传 artifact 时盘上只剩 1.7 GB。
+# LLVM 那段装完后 PRUNE_AFTER_INSTALL=1 把 build/ 和源码删掉（实测腾 5 GB）。
 #
 # **另一个便宜**：host 工具（clang/lld/python/hermesc）直接跑在 ubuntu-22.04-arm 上，
 # 它本身就是 glibc 2.35 —— 开发机上那套「在 ubuntu:22.04 容器里编」的机关在这儿
 # 用不着，因为 runner 本身就是老发行版。
 #
-# ⚠️ **这份 workflow 没在 CI 上真跑过**（仓库开源前没有 Actions）。每一步的命令
-# 在本机验过，YAML 的接线没有。第一次跑先看 df 那一步：整个设计建立在
-# 「runner 上确实有 8+ GB 可用」这个还没量过的前提上。
+# run #1 实测耗时：hermesc 2 分钟、llvm 60 分钟（其中编 LLVM 56）、ndk-package
+# 5 分钟（含打两次比对）。sdk-tools 那次红了，见下面 prepare-ndk.sh 的注释。
+
 name: release-build
 
 on:
@@ -90,20 +94,16 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq curl unzip zip file python3
       - uses: actions/download-artifact@v4
         with: { name: toolchain, path: "${{ runner.temp }}" }
-      - name: Unpack the toolchain and fetch the official NDK
+      - name: Unpack the toolchain
         run: |
           mkdir -p "$RUNNER_TEMP/work/out"
           tar -C "$RUNNER_TEMP/work/out" -xzf "$RUNNER_TEMP/toolchain.tar.gz"
-          tools/fetch-google-package.sh "ndk;${{ inputs.ndk_version }}" "$RUNNER_TEMP/ndk"
-      - name: Graft the toolchain, patch, package
+      - name: Assemble a usable NDK, then package
         run: |
-          N=$(ls -d "$RUNNER_TEMP"/ndk/*/ | head -1); N="${N%/}"
-          rm -rf "$N/toolchains/llvm/prebuilt/linux-aarch64"
-          cp -a "$RUNNER_TEMP/work/out/llvm/linux-aarch64" "$N/toolchains/llvm/prebuilt/"
-          X="$N/toolchains/llvm/prebuilt/linux-x86_64"; T="$N/toolchains/llvm/prebuilt/linux-aarch64"
-          rm -rf "$T/sysroot" "$T/lib/clang"
-          cp -a "$X/sysroot" "$T/sysroot"; cp -a "$X/lib/clang" "$T/lib/clang"
-          tools/patch-ndk.sh "$N"
+          # 拼 NDK 的活收在 tools/prepare-ndk.sh 里 —— sdk-tools 也要同一棵树，
+          # 抄两份迟早长歪（manifest 解析那次的教训）。
+          N=$(tools/prepare-ndk.sh "${{ inputs.ndk_version }}" \
+                "$RUNNER_TEMP/work/out/llvm/linux-aarch64" "$RUNNER_TEMP/ndk" | tail -1)
           if [ "${{ inputs.verify_repro }}" = "true" ]; then
             # 打两次比 sha256。目录拷完包就删，峰值仍是一份（~3.5 GB），
             # 但时间翻倍 —— 所以做成开关，日常构建可以关掉。
@@ -117,7 +117,8 @@ jobs:
   sdk-tools:
     runs-on: ubuntu-22.04-arm
     timeout-minutes: 180
-    needs: ndk-package          # 编 SDK 那批要用我们自己的 NDK（官方那份是 x86_64）
+    # 只依赖工具链，不依赖 NDK 包 —— 所以能跟 ndk-package 并行跑。
+    needs: llvm
     steps:
       # **必须检出 tag，不是 main**：SOURCE_DATE_EPOCH 默认取 HEAD 的提交时间，
       # 在 main 上打出来的包属于 main 那个 commit，跟 Release 对不上。
@@ -125,12 +126,18 @@ jobs:
         with: { ref: "${{ inputs.release_tag }}" }
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq cmake ninja-build git curl unzip zip file python3 protobuf-compiler
       - uses: actions/download-artifact@v4
-        with: { name: ndk-package, path: "${{ runner.temp }}" }
-      - name: Unpack our NDK
+        with: { name: toolchain, path: "${{ runner.temp }}" }
+      - name: Assemble a usable NDK
         run: |
-          mkdir -p "$RUNNER_TEMP/sdk"
-          tar -C "$RUNNER_TEMP/sdk" -xzf "$RUNNER_TEMP"/android-ndk-*-ours.tar.gz
-          echo "ANDROID_NDK_HOME=$(ls -d $RUNNER_TEMP/sdk/ndk/*/ | head -1)" >> "$GITHUB_ENV"
+          # **不能解 `-ours` 那个包来编东西**：它是故意不完整的 —— sysroot 和
+          # lib/clang 是 Google 分发的文件，我们不转发，由 install.sh 在装的时候
+          # 从官方包补回来。run #1 就是这么红的：解开 -ours 包直接编，没有头文件
+          # 和目标库，2 分钟报废。
+          mkdir -p "$RUNNER_TEMP/work/out"
+          tar -C "$RUNNER_TEMP/work/out" -xzf "$RUNNER_TEMP/toolchain.tar.gz"
+          N=$(tools/prepare-ndk.sh "${{ inputs.ndk_version }}" \
+                "$RUNNER_TEMP/work/out/llvm/linux-aarch64" "$RUNNER_TEMP/ndk" | tail -1)
+          echo "ANDROID_NDK_HOME=$N" >> "$GITHUB_ENV"
       - name: Fetch sources and build each tool
         run: |
           for t in aapt2 aapt aidl dexdump split-select zipalign adb etc1tool fastboot \
