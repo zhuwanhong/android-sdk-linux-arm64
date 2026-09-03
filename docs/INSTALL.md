@@ -171,3 +171,10 @@ binaries.
 | `adb` cannot see a device over an SSH tunnel | Bind IPv4 explicitly on both ends: `ssh -R 127.0.0.1:5037:127.0.0.1:5037 …`, and kill the local `adb` server first, or the forward cannot bind. |
 
 Chinese original, with more background: [zh/INSTALL.md](zh/INSTALL.md).
+
+## Changing an NDK later
+
+`install.sh` lays down a whole SDK root; it cannot add or swap a single NDK
+inside one that already exists and is in use. That procedure — and why it has to
+stage and rename rather than copy in place — is in
+[MANAGING-NDK.md](MANAGING-NDK.md).

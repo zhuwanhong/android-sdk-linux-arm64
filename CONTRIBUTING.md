@@ -56,6 +56,7 @@ will corrupt the log and the exit code of a run in progress.
 | `tests/` | sample apps, built both by hand and through AGP — both paths must work |
 | `docs/` | English; Chinese originals live in `docs/zh/` and should be kept in step |
 | `tools/check-exit-codes.sh` | runs each build script's acceptance and asserts it really exits 0 — printing a success banner is not the same as returning 0 |
+| `docs/MANAGING-NDK.md` | changing one NDK inside a live SDK root — why `install.sh` cannot do it, and the atomic-rename procedures |
 | `docs/RELEASING.md` | how a release is cut and why the steps are in that order — read it before tagging |
 | `.github/workflows/` | `checks.yml` (fast, every push), `smoke-build.yml`, `release-build.yml` (manual; produces the release artifacts) |
 
