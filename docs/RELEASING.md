@@ -144,3 +144,57 @@ sha256sum /tmp/dl.tgz              # must equal the table
 
 Then run step 4 again against the downloaded files. A release nobody has
 installed from its own download URL has not been tested.
+
+---
+
+## Adding a second NDK version to an existing release
+
+`ndk_version` selects which NDK is built; `ndk_only` says to build **only** that
+NDK and leave the rest of the release alone. r28 was added to v1.0.0 this way,
+after r27 was already published:
+
+```
+release_tag        v1.0.0
+ndk_version        28.2.13676358
+ndk_only           ✓
+allow_clang_skew   ✓          # r28 declares clang 19.0.1; the branch tip is 19.0.2
+```
+
+`sdk-tools` and `hermesc` are skipped, so the run is one LLVM build (~60 min)
+plus packaging. The three archives already attached are not rebuilt and not
+touched — verified after the fact by comparing their sizes and checksums before
+and after.
+
+Three traps sit on this path, all of them hit for real. They are listed because
+none of them announces itself:
+
+- **The compiler pin has to move with the branch.** `build-llvm.sh` pins an
+  exact commit, and that commit belongs to *its default branch*. Pointing it at
+  another NDK without changing the pin fails about two minutes into the build.
+  `tools/resolve-llvm-pin.sh` now derives branch, version, revision **and**
+  `LLVM_PIN=auto` from the NDK itself, and CI calls it — but if you drive
+  `build-llvm.sh` by hand, you have to pass all four.
+- **The version cross-check is off exactly when you need it.**
+  `build-llvm.sh` compares the compiler it built against what the NDK declares,
+  and `ALLOW_CLANG_VER_SKEW` suppresses that comparison — which is mandatory for
+  r28. So nothing would report "this r28 package contains r27's compiler". After
+  publishing, extract the compiler from the archive and run it:
+
+  ```bash
+  tar -xzf android-ndk-<ver>-linux-aarch64-ours.tar.gz \
+      --wildcards '*/prebuilt/linux-aarch64/bin/clang-*'
+  ./ndk/<ver>/toolchains/llvm/prebuilt/linux-aarch64/bin/clang-19 --version
+  ```
+
+  The `based on rXXXXXX` string must match the NDK you asked for.
+- **The `-ours` archive cannot be used as a toolchain.** It deliberately omits
+  `sysroot` and `lib/clang`, which are Google's files; `tools/install.sh` fetches
+  them at install time. Anything that needs a working NDK must assemble one with
+  `tools/prepare-ndk.sh`, which finishes by compiling an actual
+  aarch64-linux-android object — "the directories exist" does not catch this.
+
+Afterwards the documented checksums have to be brought in line with what was
+published, in `docs/RELEASE-NOTES.md` **and** in `docs/VERSIONS.md` and its
+Chinese copy. Check 13 in `tools/ci-checks.sh` fails on any checksum in a
+tracked `.md` that the latest release does not carry; it is what caught the
+Chinese copy being missed.
