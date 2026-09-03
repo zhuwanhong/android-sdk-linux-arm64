@@ -48,4 +48,22 @@ case "$_ls" in
       git ls-remote --heads $LLVM_URL 'llvm-r*' | tail" ;;
 esac
 
+# **LLVM_PIN 也得跟着换。** build-llvm.sh 里钉死的那个提交号属于它默认的那条
+# 分支（r27.1）；拿它去别的分支上取，两分钟就失败 —— run #6 就是这么红的。
+# build-ndk-version.sh 一直显式设 LLVM_PIN=auto，而 CI 那条路没有。
+#
+# 规则：分支跟 build-llvm.sh 的默认值一致，就沿用它钉死的提交（那是记录在案、
+# 验过黄金值的）；不一致就 auto（编分支 tip），因为**新版本该钉哪个提交，
+# 在编出来、对过版本串之前根本不知道**。
+default_branch=$(sed -n 's/^LLVM_BRANCH="${LLVM_BRANCH:-\(.*\)}"$/\1/p' \
+                 "$(dirname "${BASH_SOURCE[0]}")/build-llvm.sh" | head -1)
+if [ -n "$default_branch" ] && [ "$branch" != "$default_branch" ]; then
+  note "分支不是 build-llvm.sh 的默认值（$default_branch）-> LLVM_PIN=auto"
+  pin_line="LLVM_PIN=auto"
+else
+  pin_line=""
+fi
+
 printf 'LLVM_BRANCH=%s\nNDK_CLANG_VER=%s\nNDK_CLANG_REV=%s\n' "$branch" "$ver" "$rev"
+[ -n "$pin_line" ] && printf '%s\n' "$pin_line"
+exit 0

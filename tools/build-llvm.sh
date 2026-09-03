@@ -257,8 +257,14 @@ if [ "$DO_FETCH" = 1 ]; then
   ok "cmake $cmv，ninja $(ninja --version)，$(nproc) 核"
 
   step "查磁盘"
-  avail=$(df -BG --output=avail "$WORK" 2>/dev/null | tail -1 | tr -dc '0-9')
-  note "$WORK 还剩 ${avail} GB"
+  # **目录还不存在时 df 什么都不输出**，avail 变成空串，下面那句 -ge 判不过，
+  # 于是报「至少要 12 GB」—— 指的方向完全是错的（真因是路径不在）。
+  # 往上找到第一个存在的父目录再问。实测踩过：WORK 指到一个新路径就这样。
+  probe="$WORK"
+  while [ -n "$probe" ] && [ ! -d "$probe" ]; do probe=$(dirname "$probe"); done
+  avail=$(df -BG --output=avail "$probe" 2>/dev/null | tail -1 | tr -dc '0-9')
+  [ -n "$avail" ] || die "问不出 $probe 的剩余空间（df 没输出）。路径对吗？"
+  note "$probe 还剩 ${avail} GB"
   [ "${avail:-0}" -ge "${NEED_GB:-12}" ] || die \
 "至少要 ${NEED_GB:-12} GB。实测（x86_64，4 核）：源码 2.1 + build 3.4 + 装出来 1.8
     = 7.3 GB，留点余量算 12。想硬来：NEED_GB=8 tools/build-llvm.sh --fetch"
