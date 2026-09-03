@@ -43,8 +43,9 @@ NDK**，它的 clang 在 ARM64 上根本 exec 不了。
 | r26（LTS） | `26.3.11579264` | 老 LTS，按需 | 否 |
 | r25（LTS） | `25.2.9519653` | 老 LTS，按需 | 否 |
 
-r28 的包：`android-ndk-28.2.13676358-linux-aarch64-ours.tar.gz`，341 MB，
-sha256 `7c8a609de5c93ffaa2d8f3df59083123c24a16a3295f4867792fab8668f4b383`。
+两个 NDK 挂在同一个 Release 上。r28 的包：
+`android-ndk-28.2.13676358-linux-aarch64-ours.tar.gz`，340 MB，
+sha256 `4c0b810194744c7b542e72a0daf456c0b3eb460b565d83ab032ceb59e5735c39`。
 
 `build-tools` 是另一回事：我们的二进制来自 AOSP 源码、**跟 build-tools 版本号
 没有内在关系**，所以 `tools/install.sh --build-tools <版本>` 能覆盖 **82 个中的

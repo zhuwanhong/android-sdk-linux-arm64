@@ -13,11 +13,12 @@ LLVM source. Google publishes these for `linux-x86_64` only.
 
 ### Artifacts
 
-Built from tag `v1.0.0` (`4c2378b`), by .github/workflows/release-build.yml.
+Built from tag `v1.0.0` (`bf3b422`), by .github/workflows/release-build.yml.
 
 | File | Bytes | sha256 |
 |---|---:|---|
 | `android-ndk-27.1.12297006-linux-aarch64-ours.tar.gz` | 349,188,275 | `218286f50194da7470e20b4fad261cf05d7923cc8b81613ad09e118052595bb1` |
+| `android-ndk-28.2.13676358-linux-aarch64-ours.tar.gz` | 356,638,192 | `4c0b810194744c7b542e72a0daf456c0b3eb460b565d83ab032ceb59e5735c39` |
 | `android-sdk-linux-arm64-36.0.0-ours.tar.gz` | 38,047,751 | `f82700229b117aca7720c227bec1e62259071b5e1f0d60e0569244149aee357a` |
 | `hermesc-250829098.0.17-linux-aarch64.tar.gz` | 1,648,588 | `a9551c476081a48cf668ca146ef6d7143e86c605a774e5d6be69da10d99c4764` |
 

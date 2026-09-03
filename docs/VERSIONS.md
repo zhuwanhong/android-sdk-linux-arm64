@@ -46,8 +46,8 @@ Hence: **one patch release per major, and it is the one the ecosystem pins.**
 | r26 (LTS) | `26.3.11579264` | older LTS, on request | no |
 | r25 (LTS) | `25.2.9519653` | older LTS, on request | no |
 
-r28 package: `android-ndk-28.2.13676358-linux-aarch64-ours.tar.gz`, 341 MB,
-sha256 `7c8a609de5c93ffaa2d8f3df59083123c24a16a3295f4867792fab8668f4b383`.
+Both NDKs are attached to the same release. r28 package: `android-ndk-28.2.13676358-linux-aarch64-ours.tar.gz`, 340 MB,
+sha256 `4c0b810194744c7b542e72a0daf456c0b3eb460b565d83ab032ceb59e5735c39`.
 
 `build-tools` is a different story: our binaries come from AOSP source and are
 not tied to a build-tools revision, so `tools/install.sh --build-tools <rev>`
