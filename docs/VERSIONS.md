@@ -45,6 +45,44 @@ Hence: **one patch release per major, and it is the one the ecosystem pins.**
 | r28 | `28.2.13676358` | AGP 9.3 default; Flutter pins it | **yes** |
 | r26 (LTS) | `26.3.11579264` | older LTS, on request | no |
 | r25 (LTS) | `25.2.9519653` | older LTS, on request | no |
+| r29, r30 | — | newer, but neither is LTS and nothing defaults to them | no |
+
+Checked 2026-09-04, because upstream having r30 out looks like a reason to move
+and is not one:
+
+- Google's NDK revision history marks **r21e, r23, r25, r26, r27** as LTS and
+  nothing newer — r29 and r30 are ordinary releases.
+- The newest stable AGP, **9.4.0**, still defaults to `28.2.13676358` — read out
+  of the constant in its own jar, same value as 9.3.1.
+
+`tools/check-upstream-versions.sh` now tests those two conditions rather than
+"is there something newer", and runs monthly from `smoke-build`. Its first
+version compared against the newest release and would have gone yellow every
+month for a version we deliberately do not ship — a check nobody would read
+after the third time.
+
+## I want a version you do not ship
+
+Any NDK version can be built from these recipes; the shipped set is a default,
+not a limit.
+
+**Build it yourself** — one command, and it works out which LLVM branch that NDK
+needs rather than making you find out:
+
+```bash
+tools/build-ndk-version.sh 29.0.14206865      # or any version in the manifest
+tools/fetch-google-package.sh --list-stable ndk   # what upstream has
+```
+
+Expect roughly 90 minutes for LLVM plus packaging, and see the notes on clang
+version skew below — a release whose declared compiler version has moved on
+needs `ALLOW_CLANG_VER_SKEW=1`, and you should check what ended up in the
+package afterwards.
+
+**Or ask for it.** Open an issue saying which version and why. Publishing one
+into an existing release is a documented, mostly unattended operation — the
+`ndk_only` mode in [RELEASING.md](RELEASING.md), which is exactly how r28 was
+added next to r27.
 
 Both NDKs are attached to the same release. r28 package: `android-ndk-28.2.13676358-linux-aarch64-ours.tar.gz`, 340 MB,
 sha256 `4c0b810194744c7b542e72a0daf456c0b3eb460b565d83ab032ceb59e5735c39`.
