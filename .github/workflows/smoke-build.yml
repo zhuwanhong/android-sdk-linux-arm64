@@ -37,6 +37,12 @@ jobs:
           tools/fetch-google-package.sh "ndk;$V" "$RUNNER_TEMP/ndk"
           echo "ANDROID_NDK_HOME=$(ls -d "$RUNNER_TEMP"/ndk/*/ | head -1 | sed 's:/$::')" >> "$GITHUB_ENV"
 
+      - name: Patch the NDK to know about linux-aarch64
+        # 少了这一步，NDK 的 cmake 仍然选 linux-x86_64，然后在 ARM64 runner 上
+        # 报 `Exec format error` —— run #2 就是这么红的，而报错出现在两分钟后的
+        # cmake 里，跟真因隔得很远。release-build 没事是因为它走 prepare-ndk.sh，
+        # 那里面调了这个脚本。
+        run: tools/patch-ndk.sh "$ANDROID_NDK_HOME"
       - name: Shim toolchain (bootstrap)
         # **先有鸡还是先有蛋**：我们的工具都是用 NDK 编的，而官方 NDK 的 host
         # 工具链是 x86_64 的，在 ARM64 runner 上跑不起来。薄壳把系统 clang

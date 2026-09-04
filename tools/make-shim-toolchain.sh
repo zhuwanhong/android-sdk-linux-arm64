@@ -216,6 +216,21 @@ if [ -n "$missing" ]; then
   echo "系统 LLVM 里没有、因此缺的（用到才会出问题）："
   for m in $missing; do echo "    $m"; done
 fi
+# **薄壳单独存在是没用的。** 它只是把工具链摆到 prebuilt/linux-aarch64，
+# 而「去那儿找」是 patches/ndk/ 那几个补丁的事。少了补丁，NDK 的 cmake 仍然选
+# linux-x86_64，于是在 ARM64 上编东西会得到一句 `Exec format error` ——
+# 报错在两分钟之后的 cmake 里，跟真因隔着十万八千里。
+# smoke-build 真栽过：它只跑了这个脚本，没跑 patch-ndk.sh。
+tc_cmake="$NDK/build/cmake/android.toolchain.cmake"
+if [ -f "$tc_cmake" ] && ! grep -q 'CMAKE_HOST_SYSTEM_PROCESSOR' "$tc_cmake"; then
+  echo
+  echo "  ⚠ 这份 NDK **还没打过 host tag 的补丁**。"
+  echo "    薄壳摆好了，但 NDK 的 cmake 仍然只认 linux-x86_64 —— 现在去编东西"
+  echo "    会在 cmake 里报 'Exec format error'（它去跑了 x86_64 的 clang）。"
+  echo "    先跑：tools/patch-ndk.sh \"$NDK\""
+  exit 1
+fi
+
 echo
 echo "验一下："
 echo "  tools/verify-claims.sh              # 第 3 节应该报 clang 已就位"
