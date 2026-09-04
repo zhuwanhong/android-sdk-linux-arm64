@@ -43,6 +43,13 @@ jobs:
         # 包一层当 host 工具链用，够把第一个工具编出来。见 README 第四节。
         run: tools/make-shim-toolchain.sh "$ANDROID_NDK_HOME"
 
+      - name: Fetch the shared AOSP tree
+        # hprof-conv 不自带源码：这些工具**共用一棵树**（libbase / libutils /
+        # libandroidfw 都在里面），取树的活在 build-aapt2.sh 里。
+        # 少了这一步，build-hprof-conv.sh 会当场死在 common_need_src ——
+        # run #1 就是这么红的，而这个 workflow 从写出来到那天从没跑过，
+        # 所以这个洞在里面躺了一个星期。
+        run: WORK="$RUNNER_TEMP/work" tools/build-aapt2.sh --fetch
       - name: Build hprof-conv and accept it
         run: WORK="$RUNNER_TEMP/work" tools/build-hprof-conv.sh
 
