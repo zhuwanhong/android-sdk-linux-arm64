@@ -13,21 +13,52 @@
 #   tools/fetch-google-package.sh "build-tools;36.0.0" /目标目录
 #   tools/fetch-google-package.sh "platforms;android-36" /目标目录
 #   tools/fetch-google-package.sh --url-only "ndk;27.1.12297006"     # 只打印地址
+#   tools/fetch-google-package.sh --list-stable ndk                  # 列 stable 频道的版本
 #
 # **下载即接受 Google 的条款** —— 这些文件是他们分发的，本项目不转发。
 set -uo pipefail
 die() { printf '\n  \033[31m✗\033[0m %s\n' "$1" >&2; exit 1; }
 MANIFEST=https://dl.google.com/android/repository/repository2-3.xml
 
-URL_ONLY=0
-[ "${1:-}" = "--url-only" ] && { URL_ONLY=1; shift; }
+URL_ONLY=0; LIST=0
+[ "${1:-}" = "--url-only" ]   && { URL_ONLY=1; shift; }
+[ "${1:-}" = "--list-stable" ] && { LIST=1; shift; }
 PKG="${1:-}"; DEST="${2:-}"
 [ -n "$PKG" ] || die "要一个包名，比如 ndk;27.1.12297006"
-[ "$URL_ONLY" = 1 ] || [ -n "$DEST" ] || die "要一个目标目录"
+[ "$URL_ONLY" = 1 ] || [ "$LIST" = 1 ] || [ -n "$DEST" ] || die "要一个目标目录"
 
 command -v curl >/dev/null || die "要 curl"
 man=$(mktemp); trap 'rm -f "$man"' EXIT
 curl -fsSL -o "$man" "$MANIFEST" || die "取不到 manifest（离线？）"
+
+if [ "$LIST" = 1 ]; then
+  # 列某一类包在 **stable 频道**里有哪些版本。
+  # **必须按频道过滤**：manifest 里 stable/beta/dev/canary 混在一起，不过滤的话，
+  # 上游一发预览版，调用方（check-upstream-versions.sh）就开始乱叫 —— 而一条会
+  # 乱叫的检查用不了几次就没人看了。频道 id 到名字的映射也在 manifest 里，别写死。
+  python3 - "$man" "$PKG" <<'PYEOF'
+import sys, xml.etree.ElementTree as ET
+root = ET.parse(sys.argv[1]).getroot()
+prefix = sys.argv[2].rstrip(";") + ";"
+chan = {c.get("id"): c.text for c in root.iter() if c.tag == "channel"}
+out = set()
+for p in root.iter():
+    path = p.get("path") or ""
+    if not (p.tag.endswith("remotePackage") and path.startswith(prefix)):
+        continue
+    ref = ""
+    for e in p.iter():
+        if e.tag == "channelRef":
+            ref = e.get("ref") or ""
+    if chan.get(ref) == "stable":
+        out.add(path[len(prefix):])
+def key(v):
+    try: return [int(x) for x in v.split(".")]
+    except ValueError: return [0]
+print("\n".join(sorted(out, key=key)))
+PYEOF
+  exit 0
+fi
 
 url=$(python3 - "$man" "$PKG" <<'PYEOF'
 import sys, xml.etree.ElementTree as ET

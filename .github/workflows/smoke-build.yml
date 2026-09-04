@@ -46,6 +46,17 @@ jobs:
       - name: Build hprof-conv and accept it
         run: WORK="$RUNNER_TEMP/work" tools/build-hprof-conv.sh
 
+      - name: Upstream versions (exit 10 = upstream moved, not a failure)
+        # 谁盯着「上游出新版本了」？以前没人 —— hermesc 自己从 .0.16 走到 .0.17，
+        # 是打包时偶然发现的。手写的「记得定期看一眼」没人会真的看。
+        run: |
+          set +e
+          tools/check-upstream-versions.sh; rc=$?
+          if [ $rc = 10 ]; then
+            echo "::notice::upstream has newer versions — see the log; this is a decision, not a failure"
+            exit 0
+          fi
+          exit $rc
       - name: Upstream patch status (exit 10 = upstream moved, not a failure)
         # 结论会过期：上游修掉某处之后，我们该做的是删补丁 + 升 tag。
         # 手写的结论没人回头复核，跑得起来的检查才会。
