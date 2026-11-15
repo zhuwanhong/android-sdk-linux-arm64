@@ -39,7 +39,7 @@ PROTOC="$WORK/protoc/bin/protoc"
 
 # 上游子模块 pin 的 tag。不是抄来的，是拿上游实际 pin 的 commit 跟 AOSP 的 tag
 # 对出来的，common_check_pin 每次 --fetch 会重对一遍。
-AOSP_TAG=platform-tools-35.0.2
+AOSP_TAG=platform-tools-37.0.3
 GOOGLESOURCE=https://android.googlesource.com/platform
 
 die()  { printf '\n  \033[31m✗\033[0m %s\n' "$1" >&2; exit 1; }
